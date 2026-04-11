@@ -1,145 +1,168 @@
-# cbrain
-CBrain: Execution Control Layer for AI Agents. Real-time risk scoring, policy enforcement (Allow/Review/Block), signed evidence, and deterministic replay
-CBrain — The Control Brain for Agentic Systems
-Runtime enforcement, risk-aware decisions, and auditability for production-grade AI agents.
-While GBrain gives your agent memory, skills, and intelligence — CBrain ensures it makes safe, governed, and auditable decisions before any action is executed.
-The Missing Layer
-Most agent frameworks today have:
+# 🚀 cbrain
 
-LLM + Memory (reasoning)
-Tools / Code Execution (action)
+**The layer that understands consequences before an AI agent acts.**
 
-What's missing: A hardened decision enforcement layer in between.
-CBrain fills that gap.
+---
 
-✨ Features
-Core Decision Engine
+## 🧠 What is cbrain?
 
-Real-time policy evaluation and risk scoring for every planned action
-Three-tier decisions: ALLOW | REVIEW | BLOCK
-Context-aware, intent-aware, and policy-driven rulings
-Adaptive risk control that adjusts based on behavior and sensitivity
+Most AI systems today can:
+- reason  
+- plan  
+- generate actions  
 
-Safety & Protection
+But they **don’t understand consequences**.
 
-Simulation mode (fast dry-run before execution)
-Irreversible action protection (delete, transfer, rm -rf, etc.)
-PrivateVault sandbox integration with automatic cleanup
-Authority & permission modeling at runtime
+cbrain sits between planning and execution:
 
-Audit & Transparency
+gbrain → plans action  
+cbrain → evaluates risk & consequences  
+PrivateVault → enforces decision  
 
-Deterministic Replay System — Replay any decision exactly as it happened
-Cryptographically signed evidence + verification hashes
-Tamper-proof decision receipts
-Full audit trail (intent → risk → policy → outcome)
+---
 
-Integration & DX
+## ⚠️ The Problem
 
-Native integration with GBrain, Hermes, OpenClaw, and LangGraph-style agents
-Seamless gbrain → CBrain → Execution pipeline
-Clean CLI tools for policy testing, replays, and monitoring
-Multi-tenant & policy scoping support
-Pluggable policy architecture (TypeScript + Python)
+AI agents are moving from:
+- generating text → to executing real-world actions
 
-Advanced Capabilities
+But there’s a missing layer:
 
-Sovereign & finance-grade policies
-Safe observability policies
-Dream-cycle compatible (works with GBrain’s nightly maintenance)
-High-performance decision engine (<50ms typical latency)
+**Who decides if an action should even be attempted?**
 
+Without it:
+- destructive commands execute  
+- financial actions go unchecked  
+- irreversible operations slip through  
 
-Quick Start
-Bash# Install
-npm install @cbrain/core
+---
 
-# Or via npx
-npx cbrain init
-TypeScriptimport { CBrain } from '@cbrain/core';
+## ✅ The Solution
 
-const cbrain = new CBrain({
-  policies: ['adaptive-risk-control', 'safe-observability', 'sovereign-v1-finance'],
-  vault: 'privatevault.ai'
-});
+cbrain evaluates every action *before execution*:
 
-// Agent plans an action
-const decision = await cbrain.evaluate({
-  intent: "transfer_funds",
-  context: { amount: 50000, user: "admin" },
-  agentId: "hermes_agent"
-});
+- risk scoring  
+- action classification  
+- consequence modeling  
+- decision recommendation (ALLOW / REVIEW / BLOCK)
 
-console.log(decision.result); // ALLOW | REVIEW | BLOCK
+---
 
-Example: Real Decision Replay
-Bash# Replay any past decision
-npx cbrain replay 0x20688bc5
-Output:
+## 🔥 Example
 
-Result: REVIEW
-Reason: Unknown or medium-risk action
-Policy: adaptive-risk-control
-Evidence: 0xfacec35828 (Verified)
+```bash
+python run_flow.py transfer_funds
+```
 
+```
+[gbrain] Planned action: transfer_funds
 
-Why CBrain?
+[cbrain] Action: transfer_funds
+Risk Score: 0.9
+Level: HIGH
+Category: financial_irreversible
+Decision: BLOCK
 
+[PrivateVault] Enforcement:
+RESULT: BLOCK
+POLICY: pre-execution-risk-control
+```
 
+---
 
+```bash
+python run_flow.py read_system_logs
+```
 
+```
+[gbrain] Planned action: read_system_logs
 
+[cbrain] Action: read_system_logs
+Risk Score: 0.2
+Level: LOW
+Category: read_only
+Decision: ALLOW
 
+[PrivateVault] Enforcement:
+RESULT: ALLOW
+POLICY: safe-observability
+```
 
+---
 
+## 🧩 Architecture
 
+[Agent / gbrain]  
+        ↓  
+[cbrain — consequence layer]  
+        ↓  
+[PrivateVault — execution control]  
 
+---
 
+## 💡 Key Ideas
 
+- **Pre-execution intelligence**  
+  Evaluate actions before they happen
 
+- **Irreversibility awareness**  
+  Detect destructive or financial operations
 
+- **Decision-first systems**  
+  Action is not the output — **decision is**
 
+- **Separation of concerns**
+  - gbrain → thinking  
+  - cbrain → judgment  
+  - PrivateVault → enforcement  
 
+---
 
+## ⚡ Why This Matters
 
+The future of AI isn’t just smarter models.
 
+It’s **controllable systems**.
 
+The most important layer isn’t intelligence.  
+It’s **decision + enforcement before execution**.
 
+---
 
+## 🛠 Quick Start
 
+```bash
+git clone https://github.com/LOLA0786/cbrain
+cd cbrain
 
+python run_flow.py transfer_funds
+python run_flow.py read_system_logs
+```
 
+---
 
+## 🔭 Roadmap
 
+- dynamic authority modeling  
+- multi-step action chain evaluation  
+- rollback / irreversibility modeling  
+- policy learning from past decisions  
+- integration with real agent frameworks  
 
+---
 
+## 🧠 Positioning
 
+gbrain remembers  
+cbrain understands consequences  
+PrivateVault enforces reality  
 
+---
 
+## ⚡ Final Thought
 
+AI doesn’t fail at thinking.
 
+It fails at **acting safely**.
 
-LayerWithout CBrainWith CBrainReasoningGBrain / LLMGBrain / LLMDecision MakingPrompt-basedPolicy + Risk EngineExecutionDirectGated + AuditedSafetyHope & promptsDeterministic enforcementAuditabilityNone / logsSigned evidence + replays
-
-Use Cases
-
-Financial agents
-Autonomous research agents
-Enterprise & sovereign AI systems
-High-stakes agent deployments
-Safety-critical agent testing
-
-
-Roadmap
-
- Advanced authority modeling (OTANIS compatible)
- Web dashboard + visualization
- Policy marketplace
- Formal verification support
-
-
-Built For
-People who want agents that are both powerful and trustworthy.
-
-Made with ❤️ by Chandan Galani
-PrivateVault.ai | Intent-Engine
+cbrain exists to fix that.
