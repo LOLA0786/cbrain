@@ -1,3 +1,12 @@
+from .hermes import (
+    DecisionClient,
+    HermesAdapterError,
+    HermesBlockDirective,
+    HermesCapabilityMap,
+    HermesPluginContext,
+    HermesPreToolDecisionHook,
+    register_hermes_hook,
+)
 from .privatevault import (
     HttpJsonResponse,
     JsonTransport,
@@ -14,7 +23,13 @@ from .privatevault_http import (
 )
 
 __all__ = [
+    "DecisionClient",
     "HeadersProvider",
+    "HermesAdapterError",
+    "HermesBlockDirective",
+    "HermesCapabilityMap",
+    "HermesPluginContext",
+    "HermesPreToolDecisionHook",
     "HttpJsonResponse",
     "JsonTransport",
     "PrivateVaultAdapterError",
@@ -24,4 +39,5 @@ __all__ = [
     "PrivateVaultProtocolError",
     "PrivateVaultTransportError",
     "PrivateVaultVerdict",
+    "register_hermes_hook",
 ]
