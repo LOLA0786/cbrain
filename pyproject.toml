@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 dependencies = []
 
 [project.scripts]
+cbrain-eval = "cbrain.evaluation.cli:main"
 cbrain-hermes = "cbrain.hermes_launcher:main"
 
 [project.optional-dependencies]
