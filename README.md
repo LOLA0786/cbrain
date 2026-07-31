@@ -7,7 +7,8 @@ It normalizes tool calls from agent frameworks, sends consequential actions to P
 > **Status:** Production-runtime alpha. The governed runtime, PrivateVault
 > decision and evidence adapters, atomic authorization consumption, exact-byte
 > gateway, independent sidecar transport, executable CRM/ledger targets, and
-> deterministic evaluation harness are implemented. Production still requires
+> credential-safe five-provider model routing and deterministic evaluation
+> harness are implemented. Production still requires
 > the sidecar composition root, container isolation, and network policy that
 > makes the sidecar the agent's only egress route.
 
@@ -182,6 +183,67 @@ cbrain-eval scenario payments.app-fraud-chain
 See [`docs/domain-evaluation-v0.1.md`](docs/domain-evaluation-v0.1.md) for the
 contracts and harness usage.
 
+### Model Router and Five-Provider Matrix
+
+`cbrain.models` exposes one neutral interface:
+
+```text
+complete(messages, tools) -> ToolCall | TextOutput
+```
+
+Provider adapters are implemented for:
+
+- Anthropic Messages
+- OpenAI Chat Completions
+- xAI's OpenAI-compatible API
+- Google Gemini `generateContent`
+- RunPod/vLLM through an OpenAI-compatible endpoint
+
+The adapters translate provider wire formats only. They contain no policy and
+have no execution authority. Model route, model identifier, provider endpoint,
+and credential environment names are deployment-owned. A model response cannot
+select a provider URL or credential.
+
+Security properties:
+
+- Tool schemas reject credential-shaped properties
+- Returned tool arguments reject credential-shaped keys recursively
+- API keys are resolved only when the HTTPS transport begins
+- Provider credentials are passed as transport headers, never neutral messages
+- Responses are bounded, strict JSON, and fail closed on ambiguity
+- Multiple simultaneous tool calls are refused rather than silently reordered
+- RunPod endpoints must use HTTPS
+
+The evaluation matrix contains ten canonical model tasks across five routes. It
+records exact canonical proposals, unmatched calls, text responses, and control
+failures separately. Only exact proposals become `ActionIntent` inputs. The
+combined `FiveModelEvaluationHarness` then measures PrivateVault decision
+divergence without adding model identity to the decision input.
+
+Inspect the credential-free live plan:
+
+```bash
+cbrain-eval model-plan
+```
+
+Calling all five provider APIs is deliberately explicit because it may incur
+cost:
+
+```bash
+cbrain-eval model-generate --confirm-live-api
+```
+
+No live cross-provider result is claimed in this repository yet. The adapters,
+offline conformance tests, and matrix machinery are implemented; the published
+zero-divergence number must come from a separately recorded live run.
+
+### Governed-Execution Skill
+
+[`skills/govern-cbrain-execution/SKILL.md`](skills/govern-cbrain-execution/SKILL.md)
+teaches agents to preserve the CBrain authority boundary. It covers
+credential-free tool design, PrivateVault decisions, exact-byte sidecar dispatch,
+failure classification, evidence closure, and defensible cross-model reporting.
+
 ### Hermes Integration
 
 Built against the real NousResearch Hermes plugin system.
@@ -333,9 +395,9 @@ git diff --check
 Current verification:
 
 ```text
-163 default tests passed
+197 default tests passed
 7 additional real Agent DNA conformance tests passed in pinned CI
-170 total tests with the PrivateVault dependency enabled
+204 total tests with the PrivateVault dependency enabled
 Ruff clean
 Production-source mypy clean
 Dependency lock consistent
@@ -361,7 +423,15 @@ cbrain/
 ├── evaluation/
 │   ├── catalog.py
 │   ├── cli.py
-│   └── harness.py
+│   ├── harness.py
+│   └── model_matrix.py
+├── models/
+│   ├── anthropic.py
+│   ├── contracts.py
+│   ├── google.py
+│   ├── openai_compatible.py
+│   ├── router.py
+│   └── transport.py
 ├── simulators/
 │   ├── contracts.py
 │   ├── crm.py
@@ -378,6 +448,12 @@ cbrain/
 integrations/
 └── hermes/
     └── cbrain_guard/
+
+skills/
+└── govern-cbrain-execution/
+    ├── SKILL.md
+    ├── agents/openai.yaml
+    └── references/contracts.md
 
 tests/
 migrations/postgres/
@@ -411,13 +487,12 @@ AGENTS.md
    sidecar, while only the sidecar can reach target systems
 4. Add workload identity, mTLS certificate rotation, and secret-manager-backed
    credential providers
-5. Add CBrain `SKILL.md` packages and resolver policy; GBrain's external skills
-   are not currently committed in this repository
-6. Add native LangChain, CrewAI, and AutoGen execution wrappers
-7. Add Anthropic, OpenAI, xAI, Google, and RunPod/OpenAI-compatible model routing
-8. Run the live cross-model matrix and report gate-decision divergence separately
+5. Add native LangChain, CrewAI, and AutoGen execution wrappers
+6. Install the governed-execution skill into the Hermes/GBrain deployment image
+   and verify resolver policy at startup
+7. Run the live cross-model matrix and report gate-decision divergence separately
     from model activation frequency
-9. Add OpenTelemetry, metrics, structured audit export, signed containers,
+8. Add OpenTelemetry, metrics, structured audit export, signed containers,
     SBOMs, load tests, and deployment runbooks
 
 ## Positioning

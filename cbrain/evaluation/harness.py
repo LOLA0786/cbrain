@@ -54,8 +54,6 @@ class ModelTrace:
     def __post_init__(self) -> None:
         if not self.model_id.strip():
             raise ValueError("model_id must be non-empty")
-        if not self.proposals:
-            raise ValueError("model trace must contain at least one proposal")
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +98,7 @@ class DecisionDivergence:
 class DecisionMatrixReport:
     observations: tuple[DecisionObservation, ...]
     divergences: tuple[DecisionDivergence, ...]
+    model_ids: tuple[str, ...] = ()
 
     @property
     def decision_divergence_count(self) -> int:
@@ -107,7 +106,10 @@ class DecisionMatrixReport:
 
     @property
     def activation_frequency(self) -> dict[str, dict[str, int]]:
-        summaries: dict[str, dict[str, int]] = {}
+        summaries: dict[str, dict[str, int]] = {
+            model_id: {"proposals": 0, "gate_activations": 0}
+            for model_id in self.model_ids
+        }
         for observation in self.observations:
             summary = summaries.setdefault(
                 observation.model_id,
@@ -188,6 +190,7 @@ class DecisionMatrixHarness:
         return DecisionMatrixReport(
             observations=tuple(observations),
             divergences=_find_divergences(observations),
+            model_ids=tuple(model_ids),
         )
 
     @staticmethod

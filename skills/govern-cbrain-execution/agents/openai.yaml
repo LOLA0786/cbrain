@@ -1,0 +1,4 @@
+interface:
+  display_name: "Govern CBrain Execution"
+  short_description: "Build fail-closed governed agent execution"
+  default_prompt: "Use $govern-cbrain-execution to route this agent tool workflow through CBrain and PrivateVault."
