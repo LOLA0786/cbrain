@@ -1,3 +1,10 @@
+from .gbrain import (
+    GBRAIN_READ_TOOL_CAPABILITIES,
+    GBRAIN_UPSTREAM_COMMIT,
+    GBRAIN_VERSION,
+    GBrainConfigurationError,
+    GBrainStdioConfig,
+)
 from .hermes import (
     DecisionClient,
     HermesAdapterError,
@@ -23,7 +30,12 @@ from .privatevault_http import (
 )
 
 __all__ = [
+    "GBRAIN_READ_TOOL_CAPABILITIES",
+    "GBRAIN_UPSTREAM_COMMIT",
+    "GBRAIN_VERSION",
     "DecisionClient",
+    "GBrainConfigurationError",
+    "GBrainStdioConfig",
     "HeadersProvider",
     "HermesAdapterError",
     "HermesBlockDirective",
