@@ -30,7 +30,7 @@ jobs:
           repository: LOLA0786/privatevault-agent-dna
           ref: eabc02e806fe4804d7422556af3d1b376742ccfc
           path: privatevault-agent-dna
-          token: ${{ secrets.PRIVATEVAULT_REPO_TOKEN || github.token }}
+          ssh-key: ${{ secrets.PRIVATEVAULT_REPO_SSH_KEY }}
           persist-credentials: false
 
       - name: Set up Python
