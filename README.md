@@ -1,4 +1,4 @@
- # CBrain — Governed Runtime for Production AI Agents
+# CBrain — Governed Runtime for Production AI Agents
 
 CBrain is the execution-control layer between an AI agent’s plan and the systems it can affect.
 
@@ -6,9 +6,10 @@ It normalizes tool calls from agent frameworks, sends consequential actions to P
 
 > **Status:** Production-runtime alpha. The governed runtime, PrivateVault
 > decision and evidence adapters, atomic authorization consumption, exact-byte
-> gateway, and independent sidecar transport are implemented. Production still
-> requires the sidecar composition root, container isolation, and network policy
-> that makes the sidecar the agent's only egress route.
+> gateway, independent sidecar transport, executable CRM/ledger targets, and
+> deterministic evaluation harness are implemented. Production still requires
+> the sidecar composition root, container isolation, and network policy that
+> makes the sidecar the agent's only egress route.
 
 ## Architecture
 
@@ -39,10 +40,10 @@ A PrivateVault `ALLOW` decision is necessary, but it is not treated as sufficien
 
 ## Implemented
 
-Current integration branch:
+Current verified baseline:
 
 ```text
-feature/dispatcher-sidecar-v0.1
+main
 ```
 
 ### Governed Runtime Kernel
@@ -116,6 +117,70 @@ An arbitrary Python callback is not considered proof of the bytes transmitted ov
 
 The existing in-process transport remains available for local conformance tests
 and explicitly cannot claim witness independence.
+
+### Executable CRM and Ledger Targets
+
+The target simulators hold real mutable state and enforce only ordinary
+business consistency. They contain no authorization policy.
+
+CRM capabilities:
+
+- `crm.contact.read`
+- `crm.contact.merge`
+- `crm.email.send`
+- `crm.export.contacts`
+
+Finance capabilities:
+
+- `payments.balance.read`
+- `payments.limit.read`
+- `payments.limit.modify`
+- `payments.beneficiary.add`
+- `payments.transfer.initiate`
+
+Both targets provide:
+
+- Thread-safe state mutation
+- Atomic idempotency-key enforcement
+- Deterministic effect receipts
+- Strict JSON request contracts
+- Sidecar-injected bearer credential verification by digest
+- A TLS server adapter with request-content logging disabled
+
+`SimulatorDispatchPlanner` is the concrete bridge from a governed
+`ActionIntent` to `PreparedDispatch`. Destination, operation, credential
+audience, TLS peer identity, tool schema digest, tool artifact digest, and retry
+policy come from the immutable catalog and deployment evidence—not from model
+arguments.
+
+The ledger intentionally permits a business-valid APP-fraud sequence—raise a
+transfer limit, add a beneficiary, then initiate the transfer. This keeps the
+demo honest: the target's ordinary rules accept each step, while PrivateVault
+must evaluate authority, policy, and temporal context.
+
+### Evaluation Harness
+
+The canonical catalog contains benign, adversarial, multi-step, replay, and
+post-dispatch failure scenarios. The harness exposes two separate measurements:
+
+1. **Gate-decision divergence** — whether identical `ActionIntent` inputs
+   receive different PrivateVault dispositions across isolated model runs.
+2. **Gate activation frequency** — how often each model proposes an action that
+   activates the gate.
+
+Model identity is kept outside the decision input. This supports the precise
+claim that gate decisions are invariant for identical inputs without claiming
+that different models propose equally safe actions.
+
+Inspect the machine-readable catalog:
+
+```bash
+cbrain-eval catalog
+cbrain-eval scenario payments.app-fraud-chain
+```
+
+See [`docs/domain-evaluation-v0.1.md`](docs/domain-evaluation-v0.1.md) for the
+contracts and harness usage.
 
 ### Hermes Integration
 
@@ -268,9 +333,9 @@ git diff --check
 Current verification:
 
 ```text
-131 default tests passed
+163 default tests passed
 7 additional real Agent DNA conformance tests passed in pinned CI
-138 total tests with the PrivateVault dependency enabled
+170 total tests with the PrivateVault dependency enabled
 Ruff clean
 Production-source mypy clean
 Dependency lock consistent
@@ -293,6 +358,16 @@ cbrain/
 │   ├── gateway.py
 │   ├── sidecar.py
 │   └── transport.py
+├── evaluation/
+│   ├── catalog.py
+│   ├── cli.py
+│   └── harness.py
+├── simulators/
+│   ├── contracts.py
+│   ├── crm.py
+│   ├── http.py
+│   ├── ledger.py
+│   └── planner.py
 ├── consumption.py
 ├── contracts.py
 ├── dispatch.py
@@ -336,16 +411,13 @@ AGENTS.md
    sidecar, while only the sidecar can reach target systems
 4. Add workload identity, mTLS certificate rotation, and secret-manager-backed
    credential providers
-5. Build the CRM and finance capability taxonomy and executable simulators
-6. Add the benign, adversarial, multi-step, replay, and failure-injection
-   scenario harness
-7. Add CBrain `SKILL.md` packages and resolver policy; GBrain's external skills
+5. Add CBrain `SKILL.md` packages and resolver policy; GBrain's external skills
    are not currently committed in this repository
-8. Add native LangChain, CrewAI, and AutoGen execution wrappers
-9. Add Anthropic, OpenAI, xAI, Google, and RunPod/OpenAI-compatible model routing
-10. Run the cross-model matrix and report gate-decision divergence separately
+6. Add native LangChain, CrewAI, and AutoGen execution wrappers
+7. Add Anthropic, OpenAI, xAI, Google, and RunPod/OpenAI-compatible model routing
+8. Run the live cross-model matrix and report gate-decision divergence separately
     from model activation frequency
-11. Add OpenTelemetry, metrics, structured audit export, signed containers,
+9. Add OpenTelemetry, metrics, structured audit export, signed containers,
     SBOMs, load tests, and deployment runbooks
 
 ## Positioning

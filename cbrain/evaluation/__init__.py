@@ -1,0 +1,51 @@
+"""Scenario catalog and model-decision evaluation harness."""
+
+from .catalog import (
+    CapabilitySpec,
+    Consequence,
+    FaultInjection,
+    Scenario,
+    ScenarioCatalog,
+    ScenarioKind,
+    ScenarioStep,
+    default_catalog,
+)
+from .harness import (
+    DecisionDivergence,
+    DecisionDivergenceError,
+    DecisionMatrixHarness,
+    DecisionMatrixReport,
+    DecisionObservation,
+    DecisionProbe,
+    EvaluationError,
+    ExecutionObservation,
+    ModelTrace,
+    ScenarioExecutionHarness,
+    ScenarioExecutionReport,
+    ScenarioExecutor,
+    StepReference,
+)
+
+__all__ = [
+    "CapabilitySpec",
+    "Consequence",
+    "DecisionDivergence",
+    "DecisionDivergenceError",
+    "DecisionMatrixHarness",
+    "DecisionMatrixReport",
+    "DecisionObservation",
+    "DecisionProbe",
+    "EvaluationError",
+    "ExecutionObservation",
+    "FaultInjection",
+    "ModelTrace",
+    "Scenario",
+    "ScenarioCatalog",
+    "ScenarioExecutionHarness",
+    "ScenarioExecutionReport",
+    "ScenarioExecutor",
+    "ScenarioKind",
+    "ScenarioStep",
+    "StepReference",
+    "default_catalog",
+]
