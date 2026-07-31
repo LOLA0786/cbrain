@@ -1,0 +1,26 @@
+{
+  "schema": "cbrain-upstreams/v1",
+  "components": [
+    {
+      "name": "hermes-agent",
+      "repository": "https://github.com/NousResearch/hermes-agent.git",
+      "commit": "f3cda0ceb18d8ba7465a6d223098ef0e56c8fee1",
+      "observed_ref": "main",
+      "role": "agent-runtime"
+    },
+    {
+      "name": "gbrain",
+      "repository": "https://github.com/garrytan/gbrain.git",
+      "commit": "c6dc0adf26a2d20df1147d2ec87c8922ca86d410",
+      "observed_ref": "master",
+      "role": "memory-and-skills"
+    },
+    {
+      "name": "privatevault-agent-dna",
+      "repository": "git@github.com:LOLA0786/privatevault-agent-dna.git",
+      "commit": "eabc02e806fe4804d7422556af3d1b376742ccfc",
+      "observed_ref": "feature/closure-verification",
+      "role": "authorization-enforcement-and-evidence"
+    }
+  ]
+}
