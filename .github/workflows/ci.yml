@@ -65,7 +65,7 @@ jobs:
         run: uv run mypy cbrain
 
       - name: Mandatory execution-gateway conformance
-        run: uv run pytest -q tests/test_execution_gateway_conformance.py
+        run: uv run python -m pytest -q tests/test_execution_gateway_conformance.py
 
       - name: Full test suite
-        run: uv run pytest -q
+        run: uv run python -m pytest -q
