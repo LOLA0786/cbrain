@@ -1,0 +1,3 @@
+name: cbrain_guard
+version: 0.1.0
+description: Fail-closed CBrain and PrivateVault governance for Hermes tool calls
