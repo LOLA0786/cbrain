@@ -21,7 +21,8 @@ def action(arguments: dict[str, Any] | None = None) -> ActionIntent:
         tool_name="transfer_funds",
         capability="payment.execute",
         timestamp=1_700_000_000.0,
-        arguments=arguments or {
+        arguments=arguments
+        or {
             "amount": "100.00",
             "currency": "USD",
         },
@@ -81,9 +82,9 @@ def test_non_allow_decisions_never_call_tool(status):
         nonlocal calls
         calls += 1
 
-    result = GovernedRuntime(
-        StubGateway(status, call_handler=False)
-    ).execute(action(), tool)
+    result = GovernedRuntime(StubGateway(status, call_handler=False)).execute(
+        action(), tool
+    )
 
     assert result.status is status
     assert result.tool_executed is False
@@ -120,7 +121,7 @@ def test_failure_after_tool_call_is_indeterminate():
     ).execute(action(), lambda _arguments: "sent")
 
     assert result.status is ExecutionStatus.INDETERMINATE
-    assert result.tool_executed is True
+    assert result.tool_executed is None
     assert result.retryable is False
 
 
@@ -146,12 +147,10 @@ def test_gateway_cannot_dispatch_twice():
         nonlocal calls
         calls += 1
 
-    result = GovernedRuntime(
-        DoubleDispatchGateway()
-    ).execute(action(), tool)
+    result = GovernedRuntime(DoubleDispatchGateway()).execute(action(), tool)
 
     assert result.status is ExecutionStatus.INDETERMINATE
-    assert result.tool_executed is True
+    assert result.tool_executed is None
     assert result.retryable is False
     assert calls == 1
 
@@ -178,7 +177,7 @@ def test_gateway_result_must_match_request():
     ).execute(action(), lambda _arguments: "sent")
 
     assert result.status is ExecutionStatus.INDETERMINATE
-    assert result.tool_executed is True
+    assert result.tool_executed is None
     assert result.retryable is False
     assert result.reason == "request_id_mismatch"
 

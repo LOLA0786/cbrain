@@ -29,6 +29,7 @@ class RecordingClient:
             verdict=self.verdict,
             triggered_by="test-policy",
             reason="test reason",
+            request_id=action.request_id,
             _record_json=b"{}",
         )
 

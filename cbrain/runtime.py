@@ -44,11 +44,8 @@ class GovernedRuntime:
                     else ExecutionStatus.CONTROL_FAILURE
                 ),
                 request_id=action.request_id,
-                tool_executed=execution_possible,
-                reason=(
-                    "privatevault_gateway_error:"
-                    f"{type(exc).__name__}"
-                ),
+                tool_executed=None if execution_possible else False,
+                reason=(f"privatevault_gateway_error:{type(exc).__name__}"),
                 retryable=False,
             )
 
@@ -66,20 +63,14 @@ class GovernedRuntime:
                 "request_id_mismatch",
             )
 
-        if (
-            result.status is ExecutionStatus.EXECUTED
-            and handler_entries != 1
-        ):
+        if result.status is ExecutionStatus.EXECUTED and handler_entries != 1:
             return self._contract_failure(
                 action,
                 handler_entries,
                 "unproven_execution",
             )
 
-        if (
-            result.status is not ExecutionStatus.EXECUTED
-            and handler_entries != 0
-        ):
+        if result.status is not ExecutionStatus.EXECUTED and handler_entries != 0:
             return self._contract_failure(
                 action,
                 handler_entries,
@@ -103,7 +94,7 @@ class GovernedRuntime:
                 else ExecutionStatus.CONTROL_FAILURE
             ),
             request_id=action.request_id,
-            tool_executed=execution_possible,
+            tool_executed=None if execution_possible else False,
             reason=reason,
             retryable=False,
         )
