@@ -42,7 +42,12 @@ class PrivateVaultAuthorizationClaimCoordinator:
         authorization: Mapping[str, Any],
         trust_bundle: Mapping[str, Any] | None,
         binding: ExecutionAuthorizationBinding,
+        claimed_at: str | None = None,
     ) -> VerifiedAuthorization:
+        claim_time = binding.at_time if claimed_at is None else claimed_at
+        if not isinstance(claim_time, str) or not claim_time.strip():
+            raise PrivateVaultExecutionError("authorization claim time is invalid")
+
         authorization_json = _snapshot_object(
             authorization,
             "execution_authorization",
@@ -52,7 +57,7 @@ class PrivateVaultAuthorizationClaimCoordinator:
         candidate = self._use_factory.create_candidate(
             authorization=authorization_document,
             binding=binding,
-            claimed_at=binding.at_time,
+            claimed_at=claim_time,
         )
 
         already_consumed = self._consumption_store.is_consumed(candidate)
@@ -69,7 +74,7 @@ class PrivateVaultAuthorizationClaimCoordinator:
 
         verified_use = self._use_factory.create(
             verified_authorization=verified,
-            claimed_at=binding.at_time,
+            claimed_at=claim_time,
         )
 
         if verified_use != candidate:
