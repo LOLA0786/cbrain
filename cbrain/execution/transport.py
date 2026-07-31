@@ -12,9 +12,14 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from cbrain.dispatch import PreparedDispatch
+
+if TYPE_CHECKING:
+    from cbrain.adapters.privatevault_execution import (
+        ExecutionAuthorizationBinding,
+    )
 
 WitnessSigner = Callable[..., Mapping[str, Any]]
 
@@ -37,6 +42,7 @@ class DispatchResult:
     response_bytes: bytes
     effect_state: str
     output: Any
+    closure: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +67,7 @@ class DispatchTransport(Protocol):
         witness_id: str,
         observed_at: str,
         attempt: int,
+        binding: ExecutionAuthorizationBinding,
     ) -> DispatchResult:
         """Transmit the exact bytes and return signed dispatch evidence."""
 
@@ -120,6 +127,7 @@ class InProcessDispatchTransport:
         witness_id: str,
         observed_at: str,
         attempt: int,
+        binding: ExecutionAuthorizationBinding,
     ) -> DispatchResult:
         dispatch_document = prepared.dispatch
 

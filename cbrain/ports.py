@@ -11,6 +11,8 @@ ToolHandler = Callable[[Mapping[str, Any]], Any]
 class PrivateVaultGateway(Protocol):
     """Trusted adapter backed by the pinned PrivateVault implementation."""
 
+    independent_execution: bool
+
     def decide_and_execute(
         self,
         action: ActionIntent,

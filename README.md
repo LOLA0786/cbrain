@@ -4,7 +4,11 @@ CBrain is the execution-control layer between an AI agent’s plan and the syste
 
 It normalizes tool calls from agent frameworks, sends consequential actions to PrivateVault for an authoritative decision, and prevents execution unless the complete control path is available.
 
-> **Status:** Production-runtime alpha. Hermes enforcement, GBrain MCP policy, PrivateVault decision integration, and exact-byte dispatch contracts are implemented. Physical execution remains closed until PrivateVault’s signed authorization, dispatch witness, and closure chain is connected.
+> **Status:** Production-runtime alpha. The governed runtime, PrivateVault
+> decision and evidence adapters, atomic authorization consumption, exact-byte
+> gateway, and independent sidecar transport are implemented. Production still
+> requires the sidecar composition root, container isolation, and network policy
+> that makes the sidecar the agent's only egress route.
 
 ## Architecture
 
@@ -14,9 +18,9 @@ flowchart TD
     H --> C["CBrain ActionIntent"]
     C --> P["PrivateVault decision"]
     P -->|BLOCK, REVIEW, failure| B["Blocked tool result"]
-    P -->|ALLOW| E["Signed execution gateway"]
-    E --> D["Exact-byte dispatch"]
-    D --> W["Dispatch witness and closure"]
+    P -->|ALLOW| E["Signed execution permit"]
+    E --> D["Independent sole-egress sidecar"]
+    D --> W["Exact-byte send, witness, closure"]
     G["GBrain memory and skills"] --> H
 ```
 
@@ -30,15 +34,15 @@ A PrivateVault `ALLOW` decision is necessary, but it is not treated as sufficien
 | GBrain | Memory, retrieval, graph knowledge, and skills | No execution authority |
 | CBrain | Normalization, runtime invariants, routing, and fail-closed control | Enforces control availability |
 | PrivateVault Agent DNA | Policy, authority, approval, decisions, and evidence | Sole decision authority |
-| Execution gateway | Signed authorization, exact-byte dispatch, witness, and closure | Currently closed |
+| Dispatcher sidecar | Permit consumption, credentials, exact-byte egress, witness, and closure | Execution authority only under a valid signed permit |
 | RunPod/model providers | Model inference | No tool or secret authority |
 
 ## Implemented
 
-Current branch:
+Current integration branch:
 
 ```text
-feature/production-agent-runtime-v0.1
+feature/dispatcher-sidecar-v0.1
 ```
 
 ### Governed Runtime Kernel
@@ -72,7 +76,7 @@ feature/production-agent-runtime-v0.1
 - No automatic retries
 - Uses PrivateVault’s real `X-API-Key` authentication
 - Requires a full-scope key
-- Requires the key registry identity to match the configured agent identity
+- PrivateVault validates key scope and registry identity server-side
 
 ### Exact-Byte Dispatch Contract
 
@@ -91,6 +95,27 @@ feature/production-agent-runtime-v0.1
 - Retry-policy digest
 
 An arbitrary Python callback is not considered proof of the bytes transmitted over the wire.
+
+### Independent Dispatcher Sidecar
+
+- Runs outside the agent process and declares an independent witness identity
+- Receives no model-provider or target credentials from the agent
+- Resolves credentials from a signed `credential_audience` inside the sidecar
+- Uses an explicit destination and operation allow-list; model-provided URLs are
+  never dialed directly
+- Opens and verifies TLS before consuming the one-use permit
+- Compares the observed certificate digest with the peer identity in the permit
+- Atomically consumes the authorization immediately before sending
+- Sends the same immutable body bytes verified by Agent DNA
+- Signs the dispatch witness with the bytes and peer identity it observed
+- Signs closure at the dispatch boundary and returns the complete chain
+- Classifies refusal before send as `CONTROL_FAILURE`
+- Classifies any failure after send may have started as non-retryable
+  `INDETERMINATE`
+- Provides a strict HTTPS/mTLS client and TLS server adapter
+
+The existing in-process transport remains available for local conformance tests
+and explicitly cannot claim witness independence.
 
 ### Hermes Integration
 
@@ -159,7 +184,7 @@ PGLite schema migrated through version 125
 | --- | --- |
 | `block` | Tool call blocked |
 | `require_approval` | Tool call blocked with review reference |
-| `allow` | Blocked until signed execution gateway is connected |
+| `allow` | Executed only when a configured gateway completes authorization, single-use consumption, dispatch, witness, and closure; the Hermes pre-tool hook remains blocked until that gateway composition is installed |
 | Timeout or authentication failure | Tool call blocked |
 | Unknown tool | Tool call blocked |
 | Malformed response | Tool call blocked |
@@ -192,7 +217,9 @@ The reproducible dependency graph includes optional packages for:
 
 These packages are locked in `uv.lock`.
 
-Concrete framework adapters are the next milestone. Framework adapters will translate native calls into `ActionIntent`; they will not contain separate policy logic or bypass PrivateVault.
+The shared fail-closed framework guard is implemented. Native LangChain,
+CrewAI, and AutoGen execution wrappers remain to be connected to the concrete
+gateway; they will translate calls and never contain separate policy logic.
 
 ## Secrets
 
@@ -214,7 +241,7 @@ Python 3.12 or newer is required.
 ```bash
 git clone git@github.com:LOLA0786/cbrain.git
 cd cbrain
-git checkout feature/production-agent-runtime-v0.1
+git checkout main
 
 uv sync --extra dev
 ```
@@ -241,7 +268,9 @@ git diff --check
 Current verification:
 
 ```text
-129 tests passed
+131 default tests passed
+7 additional real Agent DNA conformance tests passed in pinned CI
+138 total tests with the PrivateVault dependency enabled
 Ruff clean
 Production-source mypy clean
 Dependency lock consistent
@@ -252,23 +281,31 @@ Dependency lock consistent
 ```text
 cbrain/
 ├── adapters/
+│   ├── framework.py
 │   ├── gbrain.py
 │   ├── hermes.py
 │   ├── privatevault.py
+│   ├── privatevault_claim.py
+│   ├── privatevault_consumption.py
+│   ├── privatevault_execution.py
 │   └── privatevault_http.py
+├── execution/
+│   ├── gateway.py
+│   ├── sidecar.py
+│   └── transport.py
+├── consumption.py
 ├── contracts.py
 ├── dispatch.py
-├── engine.py
 ├── hermes_launcher.py
 ├── ports.py
-├── runtime.py
-└── types.py
+└── runtime.py
 
 integrations/
 └── hermes/
     └── cbrain_guard/
 
 tests/
+migrations/postgres/
 upstreams.lock.json
 uv.lock
 pyproject.toml
@@ -292,19 +329,24 @@ AGENTS.md
 
 ## Remaining Work
 
-1. Connect PrivateVault signed execution authorization
-2. Bind exact outbound bytes and peer identity
-3. Create the independent dispatch witness
-4. Record and verify execution closure
-5. Add LangChain integration
-6. Add CrewAI integration
-7. Add AutoGen intervention handlers
-8. Add RunPod/OpenAI-compatible model routing
-9. Add workload identity and secret-manager providers
-10. Add durable approvals, queues, idempotency, and recovery
-11. Add OpenTelemetry, metrics, and structured audit export
-12. Add adversarial, failure-injection, load, and end-to-end tests
-13. Build signed containers, SBOMs, CI gates, and deployment runbooks
+1. Add the sidecar composition root and production configuration schema
+2. Build separate agent, control-plane, sidecar, CRM simulator, and ledger
+   simulator containers
+3. Enforce network policy so the agent can reach only PrivateVault and the
+   sidecar, while only the sidecar can reach target systems
+4. Add workload identity, mTLS certificate rotation, and secret-manager-backed
+   credential providers
+5. Build the CRM and finance capability taxonomy and executable simulators
+6. Add the benign, adversarial, multi-step, replay, and failure-injection
+   scenario harness
+7. Add CBrain `SKILL.md` packages and resolver policy; GBrain's external skills
+   are not currently committed in this repository
+8. Add native LangChain, CrewAI, and AutoGen execution wrappers
+9. Add Anthropic, OpenAI, xAI, Google, and RunPod/OpenAI-compatible model routing
+10. Run the cross-model matrix and report gate-decision divergence separately
+    from model activation frequency
+11. Add OpenTelemetry, metrics, structured audit export, signed containers,
+    SBOMs, load tests, and deployment runbooks
 
 ## Positioning
 

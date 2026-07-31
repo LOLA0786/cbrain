@@ -117,6 +117,7 @@ class PrivateVaultExecutionGateway:
         self._closure_writer = closure_writer
         self._clock = clock
         self._witness_id_factory = witness_id_factory
+        self.independent_execution = transport.identity.independent
 
     def decide_and_execute(
         self,
@@ -162,24 +163,35 @@ class PrivateVaultExecutionGateway:
                 planned=planned,
             )
             binding = _bind(action, planned, issued)
-            verified_authorization = self._claim_coordinator.verify_and_claim(
-                authorization=issued.authorization,
-                trust_bundle=issued.trust_bundle,
-                binding=binding,
-            )
+            if self.independent_execution:
+                verified_authorization = self._verifier.verify_authorization(
+                    authorization=issued.authorization,
+                    trust_bundle=issued.trust_bundle,
+                    binding=binding,
+                    already_consumed=False,
+                )
+            else:
+                verified_authorization = self._claim_coordinator.verify_and_claim(
+                    authorization=issued.authorization,
+                    trust_bundle=issued.trust_bundle,
+                    binding=binding,
+                    claimed_at=self._clock(),
+                )
         except Exception as exc:
             return _control_failure(
                 action,
                 f"authorization_refused:{type(exc).__name__}",
             )
 
-        # The permit is now consumed. Every path below is post-claim.
+        # For an in-process transport the permit is now consumed locally. An
+        # independent sidecar verifies and consumes it at its own sole-egress
+        # boundary immediately before transmitting the authorized bytes.
         def run_handler(arguments: Mapping[str, Any]) -> Any:
             nonlocal handler_entered
             handler_entered = True
             return handler(arguments)
 
-        transport = _rebind_handler(self._transport, run_handler)
+        transport = _prepare_transport(self._transport, run_handler)
 
         try:
             result = transport.dispatch(
@@ -190,6 +202,7 @@ class PrivateVaultExecutionGateway:
                 witness_id=self._witness_id_factory(action),
                 observed_at=self._clock(),
                 attempt=1,
+                binding=binding,
             )
         except HandlerNotInvoked as exc:
             return _control_failure(
@@ -201,7 +214,7 @@ class PrivateVaultExecutionGateway:
             return _indeterminate(
                 action,
                 f"dispatch_failed:{type(exc).__name__}",
-                handler_entered,
+                handler_entered or self.independent_execution,
                 decision_id=_decision_id(decision),
             )
 
@@ -210,18 +223,24 @@ class PrivateVaultExecutionGateway:
                 verified_authorization=verified_authorization,
                 witness=result.witness,
             )
-            closure = self._closure_writer.seal(
-                authorization=issued.authorization,
-                witness=result.witness,
-                trust_bundle=issued.trust_bundle,
-                dispatch_outcome=result.dispatch_outcome,
-                response_status=result.response_status,
-                response_bytes=result.response_bytes,
-                effect_state=result.effect_state,
-                idempotency_key_digest=(
-                    planned.prepared.dispatch["idempotency_key_digest"]
-                ),
-            )
+            closure = result.closure
+            if closure is None:
+                if self.independent_execution:
+                    raise ExecutionGatewayError(
+                        "independent dispatch returned no closure"
+                    )
+                closure = self._closure_writer.seal(
+                    authorization=issued.authorization,
+                    witness=result.witness,
+                    trust_bundle=issued.trust_bundle,
+                    dispatch_outcome=result.dispatch_outcome,
+                    response_status=result.response_status,
+                    response_bytes=result.response_bytes,
+                    effect_state=result.effect_state,
+                    idempotency_key_digest=(
+                        planned.prepared.dispatch["idempotency_key_digest"]
+                    ),
+                )
             self._verifier.verify_closure(
                 verified_dispatch=verified_dispatch,
                 closure=closure,
@@ -230,11 +249,19 @@ class PrivateVaultExecutionGateway:
             return _indeterminate(
                 action,
                 f"closure_unproven:{type(exc).__name__}",
-                handler_entered,
+                handler_entered or self.independent_execution,
                 decision_id=_decision_id(decision),
             )
 
-        if not handler_entered:
+        if self.independent_execution and handler_entered:
+            return _indeterminate(
+                action,
+                "independent_dispatch_entered_local_handler",
+                True,
+                decision_id=_decision_id(decision),
+            )
+
+        if not self.independent_execution and not handler_entered:
             return _indeterminate(
                 action,
                 "closure_without_handler_entry",
@@ -252,11 +279,14 @@ class PrivateVaultExecutionGateway:
         )
 
 
-def _rebind_handler(
+def _prepare_transport(
     transport: DispatchTransport,
     runner: Callable[[Mapping[str, Any]], Any],
 ) -> DispatchTransport:
     """Give the transport this request's single-entry handler."""
+
+    if transport.identity.independent:
+        return transport
 
     bound = getattr(transport, "with_handler", None)
     if callable(bound):

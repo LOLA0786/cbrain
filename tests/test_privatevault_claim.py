@@ -228,6 +228,21 @@ def test_verify_then_atomic_claim_order() -> None:
     assert store.lookup_values[0] == (store.claim_values[0])
 
 
+def test_claim_records_actual_consumption_time() -> None:
+    events: list[str] = []
+    store = Store(events)
+
+    _coordinator(events, store).verify_and_claim(
+        authorization=_authorization(),
+        trust_bundle={"trusted": True},
+        binding=_binding(),
+        claimed_at="2026-07-31T12:00:41Z",
+    )
+
+    assert store.lookup_values[0].claimed_at == "2026-07-31T12:00:41Z"
+    assert store.claim_values[0].claimed_at == "2026-07-31T12:00:41Z"
+
+
 def test_previously_consumed_is_rejected_by_agent_dna() -> None:
     events: list[str] = []
     store = Store(

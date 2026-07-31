@@ -19,6 +19,7 @@ class GovernedRuntime:
         handler: ToolHandler,
     ) -> GovernedExecution:
         handler_entries = 0
+        independent_execution = _is_independent_gateway(self._gateway)
 
         def invoke_once(arguments: Mapping[str, Any]) -> Any:
             nonlocal handler_entries
@@ -35,7 +36,7 @@ class GovernedRuntime:
                 invoke_once,
             )
         except Exception as exc:
-            execution_possible = handler_entries > 0
+            execution_possible = handler_entries > 0 or independent_execution
 
             return GovernedExecution(
                 status=(
@@ -54,6 +55,7 @@ class GovernedRuntime:
                 action,
                 handler_entries,
                 "invalid_gateway_result",
+                independent_execution=independent_execution,
             )
 
         if result.request_id != action.request_id:
@@ -61,13 +63,20 @@ class GovernedRuntime:
                 action,
                 handler_entries,
                 "request_id_mismatch",
+                independent_execution=independent_execution,
             )
 
-        if result.status is ExecutionStatus.EXECUTED and handler_entries != 1:
+        expected_handler_entries = 0 if independent_execution else 1
+
+        if (
+            result.status is ExecutionStatus.EXECUTED
+            and handler_entries != expected_handler_entries
+        ):
             return self._contract_failure(
                 action,
                 handler_entries,
                 "unproven_execution",
+                independent_execution=independent_execution,
             )
 
         if result.status is not ExecutionStatus.EXECUTED and handler_entries != 0:
@@ -75,6 +84,7 @@ class GovernedRuntime:
                 action,
                 handler_entries,
                 "tool_called_without_executed_status",
+                independent_execution=independent_execution,
             )
 
         return result
@@ -84,8 +94,10 @@ class GovernedRuntime:
         action: ActionIntent,
         handler_entries: int,
         reason: str,
+        *,
+        independent_execution: bool = False,
     ) -> GovernedExecution:
-        execution_possible = handler_entries > 0
+        execution_possible = handler_entries > 0 or independent_execution
 
         return GovernedExecution(
             status=(
@@ -98,3 +110,9 @@ class GovernedRuntime:
             reason=reason,
             retryable=False,
         )
+
+
+def _is_independent_gateway(gateway: object) -> bool:
+    """Recognize only an explicit boolean independent-execution declaration."""
+
+    return getattr(gateway, "independent_execution", False) is True
