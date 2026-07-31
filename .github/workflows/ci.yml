@@ -1,0 +1,71 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: cbrain
+
+    steps:
+      - name: Check out CBrain
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: cbrain
+          persist-credentials: false
+
+      - name: Check out pinned PrivateVault Agent DNA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: LOLA0786/privatevault-agent-dna
+          ref: eabc02e806fe4804d7422556af3d1b376742ccfc
+          path: privatevault-agent-dna
+          ssh-key: ${{ secrets.PRIVATEVAULT_REPO_SSH_KEY }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with:
+          enable-cache: true
+          cache-dependency-glob: cbrain/uv.lock
+
+      - name: Install locked development and PrivateVault dependencies
+        run: uv sync --locked --extra dev --extra privatevault
+
+      - name: Verify PrivateVault conformance dependencies
+        run: |
+          uv run python - <<'PY'
+          import nacl.signing
+          import agent_dna.authority_v01
+          import agent_dna.execution_v01
+          import agent_dna.dispatch_v01
+          import agent_dna.closure_v01
+          print("PrivateVault conformance dependencies: OK")
+          PY
+
+      - name: Ruff
+        run: uv run ruff check cbrain integrations tests
+
+      - name: Mypy
+        run: uv run mypy cbrain
+
+      - name: Mandatory execution-gateway conformance
+        run: uv run python -m pytest -q tests/test_execution_gateway_conformance.py
+
+      - name: Full test suite
+        run: uv run python -m pytest -q

@@ -241,7 +241,7 @@ git diff --check
 Current verification:
 
 ```text
-122 tests passed
+129 tests passed
 Ruff clean
 Production-source mypy clean
 Dependency lock consistent

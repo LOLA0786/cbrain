@@ -426,6 +426,21 @@ def _report_text(
     return fallback
 
 
+def _with_failures(
+    reason_code: str,
+    report: object,
+) -> str:
+    """Carry Agent DNA's per-check failures into the rejection reason."""
+
+    failures = getattr(report, "failures", ())
+
+    if not isinstance(failures, (tuple, list)) or not failures:
+        return reason_code
+
+    detail = "; ".join(str(item) for item in failures[:3])
+    return f"{reason_code}:{detail}"
+
+
 def _require_accepted(
     stage: str,
     report: object,
@@ -438,22 +453,27 @@ def _require_accepted(
             "UNKNOWN",
         )
     )
+    accepted = (
+        getattr(report, "ok", None) is True
+        and evidence_state == "VERIFIED"
+        and conformance == "CONFORMANT"
+    )
+
+    # Agent DNA reports no reason_code on the accepted path. Substituting the
+    # malformed-report sentinel there would stamp every successful verification
+    # with a failure label in the evidence chain.
     reason_code = _report_text(
         report,
         "reason_code",
-        "MALFORMED_VERIFICATION_REPORT",
+        "ACCEPTED" if accepted else "MALFORMED_VERIFICATION_REPORT",
     )
 
-    if (
-        getattr(report, "ok", None) is not True
-        or evidence_state != "VERIFIED"
-        or conformance != "CONFORMANT"
-    ):
+    if not accepted:
         raise PrivateVaultEvidenceRejected(
             stage=stage,
             evidence_state=evidence_state,
             decision_conformance=conformance,
-            reason_code=reason_code,
+            reason_code=_with_failures(reason_code, report),
         )
 
     principal = getattr(
