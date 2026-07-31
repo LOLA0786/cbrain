@@ -25,6 +25,18 @@ from .harness import (
     ScenarioExecutor,
     StepReference,
 )
+from .model_matrix import (
+    EvaluationTask,
+    FiveModelEvaluationHarness,
+    FiveModelMatrixReport,
+    FiveModelMatrixRunner,
+    ModelAttempt,
+    ModelGenerationReport,
+    ProposalOutcome,
+    ToolBinding,
+    default_model_tasks,
+    default_tool_bindings,
+)
 
 __all__ = [
     "CapabilitySpec",
@@ -36,9 +48,16 @@ __all__ = [
     "DecisionObservation",
     "DecisionProbe",
     "EvaluationError",
+    "EvaluationTask",
     "ExecutionObservation",
+    "FiveModelEvaluationHarness",
+    "FiveModelMatrixReport",
+    "FiveModelMatrixRunner",
     "FaultInjection",
     "ModelTrace",
+    "ModelAttempt",
+    "ModelGenerationReport",
+    "ProposalOutcome",
     "Scenario",
     "ScenarioCatalog",
     "ScenarioExecutionHarness",
@@ -47,5 +66,8 @@ __all__ = [
     "ScenarioKind",
     "ScenarioStep",
     "StepReference",
+    "ToolBinding",
     "default_catalog",
+    "default_model_tasks",
+    "default_tool_bindings",
 ]
