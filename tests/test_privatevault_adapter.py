@@ -57,6 +57,7 @@ def response(
             "record": {
                 "decision_id": "decision-1",
                 "agent_id": "agent-1",
+                "request_id": "req-1",
             },
         },
     )
@@ -84,6 +85,7 @@ def test_maps_real_privatevault_decisions(
     result = PrivateVaultDecisionClient(transport).decide(action())
 
     assert result.verdict is expected
+    assert result.request_id == "req-1"
     assert result.reason == "test decision"
     assert result.record["decision_id"] == "decision-1"
 
@@ -170,6 +172,7 @@ def test_rejects_missing_record():
 def test_record_is_immutable_snapshot():
     record: dict[str, Any] = {
         "decision_id": "decision-1",
+        "request_id": "req-1",
         "nested": {"value": 1},
     }
 
@@ -191,6 +194,55 @@ def test_record_is_immutable_snapshot():
     record["nested"]["value"] = 999
 
     assert result.record["nested"]["value"] == 1
+
+
+def test_rejects_decision_for_different_request():
+    client = PrivateVaultDecisionClient(
+        FakeTransport(
+            HttpJsonResponse(
+                status_code=200,
+                body={
+                    "decision": "allow",
+                    "triggered_by": "policy",
+                    "reason": "allowed",
+                    "record": {
+                        "decision_id": "decision-2",
+                        "request_id": "req-2",
+                    },
+                },
+            )
+        )
+    )
+
+    with pytest.raises(
+        PrivateVaultProtocolError,
+        match="different request_id",
+    ):
+        client.decide(action())
+
+
+def test_rejects_decision_without_request_binding():
+    client = PrivateVaultDecisionClient(
+        FakeTransport(
+            HttpJsonResponse(
+                status_code=200,
+                body={
+                    "decision": "allow",
+                    "triggered_by": "policy",
+                    "reason": "allowed",
+                    "record": {
+                        "decision_id": "decision-1",
+                    },
+                },
+            )
+        )
+    )
+
+    with pytest.raises(
+        PrivateVaultProtocolError,
+        match="not bound",
+    ):
+        client.decide(action())
 
 
 def test_remote_privatevault_requires_https():

@@ -82,9 +82,7 @@ def _snapshot_object(value: Mapping[str, Any], path: str) -> bytes:
             sort_keys=True,
         ).encode("utf-8")
     except (TypeError, ValueError) as exc:
-        raise ContractError(
-            f"{path} must contain only finite JSON values"
-        ) from exc
+        raise ContractError(f"{path} must contain only finite JSON values") from exc
 
 
 def _restore_object(value: bytes) -> dict[str, Any]:
@@ -146,9 +144,7 @@ class ActionIntent:
                 UnicodeDecodeError,
                 json.JSONDecodeError,
             ) as exc:
-                raise ContractError(
-                    f"{field_name} must contain a JSON object"
-                ) from exc
+                raise ContractError(f"{field_name} must contain a JSON object") from exc
 
     @classmethod
     def capture(
@@ -238,22 +234,32 @@ class GovernedExecution:
         _required_text(self.request_id, "request_id")
         _required_text(self.reason, "reason")
 
-        if (
-            self.status is ExecutionStatus.EXECUTED
-            and self.tool_executed is not True
-        ):
+        if self.status is ExecutionStatus.EXECUTED and self.tool_executed is not True:
             raise ContractError("EXECUTED requires tool_executed=True")
 
-        if self.status in {
-            ExecutionStatus.BLOCKED,
-            ExecutionStatus.REVIEW_REQUIRED,
-            ExecutionStatus.CONTROL_FAILURE,
-        } and self.tool_executed is not False:
+        if (
+            self.status
+            in {
+                ExecutionStatus.BLOCKED,
+                ExecutionStatus.REVIEW_REQUIRED,
+                ExecutionStatus.CONTROL_FAILURE,
+            }
+            and self.tool_executed is not False
+        ):
+            raise ContractError(f"{self.status.value} requires tool_executed=False")
+
+        if (
+            self.status is ExecutionStatus.INDETERMINATE
+            and self.tool_executed is not None
+        ):
             raise ContractError(
-                f"{self.status.value} requires tool_executed=False"
+                "INDETERMINATE requires tool_executed=None; execution may have occurred"
+            )
+
+        if self.retryable and self.status is not ExecutionStatus.CONTROL_FAILURE:
+            raise ContractError(
+                "only a proven pre-execution CONTROL_FAILURE may be retryable"
             )
 
         if self.retryable and self.tool_executed is not False:
-            raise ContractError(
-                "only a proven pre-execution failure may be retryable"
-            )
+            raise ContractError("only a proven pre-execution failure may be retryable")
