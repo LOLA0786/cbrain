@@ -1,0 +1,36 @@
+{
+  "organisation_id": "acme-bank",
+  "agent_id": "refund-agent-01",
+  "subject_principal": "refund-agent@acme-bank",
+  "subject_key_id": "refund-agent-01",
+
+  "privatevault_base_url": "https://privatevault.internal.acme-bank:8443",
+  "database_url": "postgresql://cbrain@postgres:5432/cbrain",
+
+  "witness_component_id": "dispatcher-01",
+  "witness_signer_key_id": "witness-signer-01",
+  "request_timeout_seconds": 5.0,
+
+  "routes": {
+    "payments.refund": {
+      "tool_id": "payments.refund.v3",
+      "capability": "payments.refund",
+      "destination": "payments.internal.acme-bank",
+      "operation": "POST /v1/refunds",
+      "credential_audience": "payments.internal.acme-bank",
+      "peer_identity": "tls-spki:payments.internal.acme-bank:v3",
+      "allowed_parameters": ["amount", "currency", "case_id", "beneficiary_id"],
+      "required_parameters": ["amount", "currency", "beneficiary_id"]
+    },
+    "crm.contact.update": {
+      "tool_id": "crm.contact.update.v1",
+      "capability": "crm.contact.update",
+      "destination": "crm.internal.acme-bank",
+      "operation": "PATCH /v1/contacts",
+      "credential_audience": "crm.internal.acme-bank",
+      "peer_identity": "tls-spki:crm.internal.acme-bank:v1",
+      "allowed_parameters": ["contact_id", "email", "phone"],
+      "required_parameters": ["contact_id"]
+    }
+  }
+}
