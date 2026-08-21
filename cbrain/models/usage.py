@@ -32,6 +32,7 @@ class TokenUsage:
     total_tokens: int | None = None
     request_id: str | None = None
     run_id: str | None = None
+    cached_input_accounting: str | None = None
 
     def __post_init__(self) -> None:
         _required_text(self.provider, "provider")
@@ -66,9 +67,13 @@ class TokenUsage:
             and self.input_tokens is None
             and self.output_tokens is None
         ):
-                raise UsageContractError(
-                    "provider-reported usage requires input or output tokens"
-                )
+            raise UsageContractError(
+                "provider-reported usage requires input or output tokens"
+            )
+        if self.cached_input_accounting is not None:
+            allowed = {"simulated_assumption", "provider_reported"}
+            if self.cached_input_accounting not in allowed:
+                raise UsageContractError("cached_input_accounting is invalid")
         if self.request_id is not None:
             _required_text(self.request_id, "request_id")
         if self.run_id is not None:
@@ -103,6 +108,7 @@ class TokenUsage:
             "total_tokens": self.total_tokens,
             "request_id": self.request_id,
             "run_id": self.run_id,
+            "cached_input_accounting": self.cached_input_accounting,
         }
 
 
@@ -117,6 +123,8 @@ class TokenUsageTotals:
     estimated_completions: int
     unknown_completions: int
 
+    simulated_cache_completions: int
+
     def to_payload(self) -> dict[str, Any]:
         return {
             "input_tokens": self.input_tokens,
@@ -127,6 +135,7 @@ class TokenUsageTotals:
             "measured_completions": self.measured_completions,
             "estimated_completions": self.estimated_completions,
             "unknown_completions": self.unknown_completions,
+            "simulated_cache_completions": self.simulated_cache_completions,
         }
 
 
@@ -139,6 +148,7 @@ def aggregate_usage(records: tuple[TokenUsage, ...]) -> TokenUsageTotals:
     measured = 0
     estimated = 0
     unknown = 0
+    simulated_cache = 0
     for record in records:
         if record.source is UsageSource.UNKNOWN:
             unknown += 1
@@ -147,6 +157,8 @@ def aggregate_usage(records: tuple[TokenUsage, ...]) -> TokenUsageTotals:
             measured += 1
         else:
             estimated += 1
+        if record.cached_input_accounting == "simulated_assumption":
+            simulated_cache += 1
         input_tokens += record.input_tokens or 0
         cached_input_tokens += record.cached_input_tokens or 0
         output_tokens += record.output_tokens or 0
@@ -172,6 +184,7 @@ def aggregate_usage(records: tuple[TokenUsage, ...]) -> TokenUsageTotals:
         measured_completions=measured,
         estimated_completions=estimated,
         unknown_completions=unknown,
+        simulated_cache_completions=simulated_cache,
     )
 
 

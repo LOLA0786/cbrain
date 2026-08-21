@@ -145,6 +145,9 @@ def _estimate_usage(
         reasoning_tokens=0,
         total_tokens=billable_input + cached_input_tokens + output_tokens,
         run_id=run_id,
+        cached_input_accounting=(
+            "simulated_assumption" if cached_input_tokens > 0 else None
+        ),
     )
 
 
@@ -155,17 +158,21 @@ def _provider_reported_usage(
     payload: Mapping[str, Any],
     run_id: str | None,
 ) -> TokenUsage:
+    cached = _optional_int(payload.get("cached_input_tokens"))
     return TokenUsage(
         provider=provider,
         model=model,
         source=UsageSource.PROVIDER_REPORTED,
         input_tokens=_optional_int(payload.get("input_tokens")),
-        cached_input_tokens=_optional_int(payload.get("cached_input_tokens")),
+        cached_input_tokens=cached,
         output_tokens=_optional_int(payload.get("output_tokens")),
         reasoning_tokens=_optional_int(payload.get("reasoning_tokens")),
         total_tokens=_optional_int(payload.get("total_tokens")),
         request_id=_optional_text(payload.get("request_id")),
         run_id=run_id,
+        cached_input_accounting=(
+            "provider_reported" if cached is not None and cached > 0 else None
+        ),
     )
 
 
