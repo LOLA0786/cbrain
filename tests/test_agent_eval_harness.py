@@ -42,8 +42,13 @@ def test_compare_reports_cost_per_successful_task(pricing) -> None:
         optimized=harness.run_configuration(OPTIMIZED_CONFIG),
         catalog=pricing,
     )
-    assert comparison["baseline"]["cost_per_successful_task"] is not None
-    assert comparison["baseline"]["task_success_rate"] >= 0.0
+    baseline = comparison["baseline"]
+    if baseline["cost_data_complete"]:
+        assert baseline["cost_per_successful_task"] is not None
+    else:
+        assert baseline["cost_per_successful_task"] is None
+        assert comparison["optimization_decision"] == "indeterminate"
+    assert baseline["task_success_rate"] >= 0.0
 
 
 def test_blocked_case_has_no_safety_violation_when_rejected(pricing) -> None:

@@ -27,6 +27,7 @@ class CostBreakdown:
     output_cost: Decimal | None
     reasoning_cost: Decimal | None
     total_cost: Decimal | None
+    known_cost_subtotal: Decimal | None
     status: str
     pricing_source_url: str | None = None
 
@@ -38,12 +39,18 @@ class CostBreakdown:
             "output_cost": _decimal_text(self.output_cost),
             "reasoning_cost": _decimal_text(self.reasoning_cost),
             "total_cost": _decimal_text(self.total_cost),
+            "known_cost_subtotal": _decimal_text(self.known_cost_subtotal),
             "status": self.status,
             "pricing_source_url": self.pricing_source_url,
         }
 
 
 _MILLION = Decimal("1000000")
+_INCOMPLETE_COST_STATUSES = frozenset({"partial_unknown", "cost_unknown"})
+
+
+def cost_is_complete(status: str) -> bool:
+    return status not in _INCOMPLETE_COST_STATUSES
 
 
 def cost_for_usage(
@@ -59,6 +66,7 @@ def cost_for_usage(
             output_cost=None,
             reasoning_cost=None,
             total_cost=None,
+            known_cost_subtotal=None,
             status="cost_unknown",
         )
     pricing = catalog.lookup(provider=usage.provider, model=usage.model)
@@ -70,6 +78,7 @@ def cost_for_usage(
             output_cost=None,
             reasoning_cost=None,
             total_cost=None,
+            known_cost_subtotal=None,
             status="cost_unknown",
         )
     if usage.input_tokens is None and usage.output_tokens is None:
@@ -80,6 +89,7 @@ def cost_for_usage(
             output_cost=None,
             reasoning_cost=None,
             total_cost=None,
+            known_cost_subtotal=None,
             status="cost_unknown",
             pricing_source_url=pricing.source_url,
         )
@@ -104,6 +114,7 @@ def cost_for_usage(
         output_cost=output_cost,
         reasoning_cost=reasoning_cost,
         total_cost=total,
+        known_cost_subtotal=total,
         status="measured"
         if usage.source is UsageSource.PROVIDER_REPORTED
         else "estimated",
@@ -124,7 +135,8 @@ def aggregate_costs(
             output_cost=Decimal("0"),
             reasoning_cost=Decimal("0"),
             total_cost=Decimal("0"),
-            status="measured",
+            known_cost_subtotal=Decimal("0"),
+            status="zero_inference",
         )
     currency: str | None = None
     input_cost = Decimal("0")
@@ -161,12 +173,24 @@ def aggregate_costs(
             output_cost=None,
             reasoning_cost=None,
             total_cost=None,
+            known_cost_subtotal=None,
             status="cost_unknown",
             pricing_source_url=source_url,
         )
     if has_unknown:
         status = "partial_unknown"
-    elif has_estimated and has_measured:
+        return CostBreakdown(
+            currency=currency,
+            input_cost=input_cost,
+            cached_input_cost=cached_cost,
+            output_cost=output_cost,
+            reasoning_cost=reasoning_cost,
+            total_cost=None,
+            known_cost_subtotal=total_cost,
+            status=status,
+            pricing_source_url=source_url,
+        )
+    if has_estimated and has_measured:
         status = "mixed"
     elif has_estimated:
         status = "estimated"
@@ -179,6 +203,7 @@ def aggregate_costs(
         output_cost=output_cost,
         reasoning_cost=reasoning_cost,
         total_cost=total_cost,
+        known_cost_subtotal=total_cost,
         status=status,
         pricing_source_url=source_url,
     )
@@ -188,7 +213,10 @@ def cost_per_successful_task(
     *,
     total_cost: Decimal | None,
     successful_tasks: int,
+    cost_status: str,
 ) -> Decimal | None:
+    if not cost_is_complete(cost_status):
+        return None
     if total_cost is None or successful_tasks <= 0:
         return None
     return total_cost / Decimal(successful_tasks)
@@ -198,7 +226,10 @@ def blended_cost_per_million_tokens(
     totals: TokenUsageTotals,
     *,
     total_cost: Decimal | None,
+    cost_status: str,
 ) -> Decimal | None:
+    if not cost_is_complete(cost_status):
+        return None
     if total_cost is None or totals.total_tokens <= 0:
         return None
     return (total_cost / Decimal(totals.total_tokens)) * _MILLION
@@ -246,5 +277,6 @@ __all__ = [
     "blended_cost_per_million_tokens",
     "cost_for_usage",
     "cost_formula_text",
+    "cost_is_complete",
     "cost_per_successful_task",
 ]

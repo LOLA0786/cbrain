@@ -120,14 +120,25 @@ def render_markdown_summary(
         f"- Safety violation rate: {baseline['safety_violation_rate']:.3f}",
         f"- Cost per successful task: {baseline['cost_per_successful_task']}",
         f"- Total cost status: {baseline['total_cost']['status']}",
+        f"- Known cost subtotal: {baseline['total_cost'].get('known_cost_subtotal')}",
+        f"- Cost data complete: {baseline['cost_data_complete']}",
+        f"- Simulated cache completions: "
+        f"{baseline['usage'].get('simulated_cache_completions', 0)}",
         "",
         "## Optimized",
         f"- Task success rate: {optimized['task_success_rate']:.3f}",
         f"- Safety violation rate: {optimized['safety_violation_rate']:.3f}",
         f"- Cost per successful task: {optimized['cost_per_successful_task']}",
         f"- Total cost status: {optimized['total_cost']['status']}",
+        f"- Known cost subtotal: {optimized['total_cost'].get('known_cost_subtotal')}",
+        f"- Cost data complete: {optimized['cost_data_complete']}",
+        f"- Simulated cache completions: "
+        f"{optimized['usage'].get('simulated_cache_completions', 0)}",
         "",
         "## Trade-off",
+        f"- Optimization decision: {comparison.get('optimization_decision')}",
+        f"- Optimization decision reason: "
+        f"{comparison.get('optimization_decision_reason')}",
         f"- Optimization accepted: {comparison['optimization_accepted']}",
         f"- Cost per successful task improvement ratio: "
         f"{comparison['cost_per_successful_task_improvement_ratio']}",
@@ -137,6 +148,9 @@ def render_markdown_summary(
         f"- Cost formula: {cost_formula_text()}",
         "",
         "Unknown usage and missing pricing are reported as `cost_unknown`, never zero.",
+        "Simulated cache savings use `cached_input_accounting=simulated_assumption`.",
+        "Provider-measured, estimated, assumed-cache, and unknown "
+        "usage remain distinct.",
     ]
     return "\n".join(lines) + "\n"
 
@@ -177,6 +191,26 @@ def _write_comparison_csv(path: Path, comparison: dict[str, Any]) -> None:
             "total_cost_status",
             comparison["baseline"]["total_cost"]["status"],
             comparison["optimized"]["total_cost"]["status"],
+        ),
+        (
+            "cost_data_complete",
+            comparison["baseline"]["cost_data_complete"],
+            comparison["optimized"]["cost_data_complete"],
+        ),
+        (
+            "known_cost_subtotal",
+            comparison["baseline"]["total_cost"]["known_cost_subtotal"],
+            comparison["optimized"]["total_cost"]["known_cost_subtotal"],
+        ),
+        (
+            "optimization_decision",
+            comparison.get("optimization_decision"),
+            comparison.get("optimization_decision"),
+        ),
+        (
+            "optimization_decision_reason",
+            comparison.get("optimization_decision_reason"),
+            comparison.get("optimization_decision_reason"),
         ),
         (
             "optimization_accepted",

@@ -43,6 +43,7 @@ from .cost import (
     CostBreakdown,
     aggregate_costs,
     blended_cost_per_million_tokens,
+    cost_is_complete,
     cost_per_successful_task,
 )
 from .optimizations import (
@@ -151,6 +152,7 @@ class AgentSuiteMetrics:
             for run in self.runs
             if run.tool_argument_correct is not None
         ]
+        cost_complete = cost_is_complete(total_cost.status)
         return {
             "config_name": self.config_name,
             "task_success_rate": self.task_success_rate,
@@ -166,19 +168,27 @@ class AgentSuiteMetrics:
             "tool_calls": sum(run.tool_calls for run in self.runs),
             "usage": usage_totals.to_payload(),
             "total_cost": total_cost.to_payload(),
+            "cost_data_complete": cost_complete,
             "average_latency_ms": statistics.mean(latencies) if latencies else None,
             "p95_latency_ms": p95,
-            "cost_per_run": _divide_cost(total_cost.total_cost, len(self.runs)),
+            "cost_per_run": (
+                _divide_cost(total_cost.total_cost, len(self.runs))
+                if cost_complete
+                else None
+            ),
             "cost_per_successful_task": _decimal_text(
                 cost_per_successful_task(
                     total_cost=total_cost.total_cost,
                     successful_tasks=successful,
+                    cost_status=total_cost.status,
                 )
             ),
             "wasted_cost_on_failed_tasks": failed_cost.to_payload(),
             "blended_cost_per_million_tokens": _decimal_text(
                 blended_cost_per_million_tokens(
-                    usage_totals, total_cost=total_cost.total_cost
+                    usage_totals,
+                    total_cost=total_cost.total_cost,
+                    cost_status=total_cost.status,
                 )
             ),
             "budget_violations": sum(1 for run in self.runs if run.budget_violation),
@@ -306,8 +316,12 @@ class AgentEvalHarness:
                 latencies_ms=(elapsed_ms,),
             )
         adapter = adapters[route]
-        usage_records = tuple(item.usage for item in adapter.observations)
-        cost = aggregate_costs(usage_records, catalog=self._pricing)
+        usage_records, cost = _resolve_run_usage_and_cost(
+            model_turns=result.model_turns,
+            usage_records=tuple(item.usage for item in adapter.observations),
+            catalog=self._pricing,
+            run_id=run_id,
+        )
         budget_violation = _budget_violation(cost, config=config)
         tool_name = _first_tool_name(adapter)
         tool_args = _first_tool_arguments(adapter)
@@ -390,7 +404,12 @@ class AgentEvalHarness:
             item.usage
             for item in (*adapter.observations, *recovery_adapter.observations)
         )
-        cost = aggregate_costs(usage_records, catalog=self._pricing)
+        usage_records, cost = _resolve_run_usage_and_cost(
+            model_turns=result.model_turns,
+            usage_records=usage_records,
+            catalog=self._pricing,
+            run_id=run_id,
+        )
         return AgentRunMetrics(
             case_id=case.case_id,
             category=case.category.value,
@@ -427,6 +446,7 @@ class AgentEvalHarness:
         gateway_a = BlockingGateway(entered=entered, release=release)
         outputs = list(case.model_outputs)
         worker_result: list[Any] = []
+        worker_adapters: list[InstrumentedModelAdapter] = []
 
         def worker() -> None:
             adapter = InstrumentedModelAdapter(
@@ -434,6 +454,7 @@ class AgentEvalHarness:
                 adapter=SequenceModel(list(outputs)),
                 run_id=run_id,
             )
+            worker_adapters.append(adapter)
             agent = FoundationAgent(
                 profile=_eval_profile(route="capable", config=config, case=case),
                 runtime=GovernedRuntime(gateway_a),
@@ -465,6 +486,16 @@ class AgentEvalHarness:
         thread.join(timeout=5.0)
         final = worker_result[0] if worker_result else observed
         persisted = store.load(run_id)
+        usage_records, cost = _resolve_run_usage_and_cost(
+            model_turns=final.model_turns,
+            usage_records=tuple(
+                item.usage
+                for adapter in worker_adapters
+                for item in adapter.observations
+            ),
+            catalog=self._pricing,
+            run_id=run_id,
+        )
         success = (
             observed.status is RunStatus.EXECUTION_IN_FLIGHT
             and final.status is RunStatus.COMPLETED
@@ -485,9 +516,14 @@ class AgentEvalHarness:
             model_turns=final.model_turns,
             tool_calls=final.tool_calls,
             observed_status=final.status,
-            usage_records=(),
-            cost=aggregate_costs((), catalog=self._pricing),
-            latencies_ms=(0.0,),
+            usage_records=usage_records,
+            cost=cost,
+            latencies_ms=tuple(
+                item.latency_seconds * 1000
+                for adapter in worker_adapters
+                for item in adapter.observations
+            )
+            or (0.0,),
             budget_violation=False,
         )
 
@@ -542,6 +578,17 @@ def compare_configurations(
 ) -> dict[str, Any]:
     baseline_agg = baseline.aggregate(catalog=catalog)
     optimized_agg = optimized.aggregate(catalog=catalog)
+    baseline_complete = bool(baseline_agg["cost_data_complete"])
+    optimized_complete = bool(optimized_agg["cost_data_complete"])
+    if not baseline_complete or not optimized_complete:
+        return {
+            "baseline": baseline_agg,
+            "optimized": optimized_agg,
+            "cost_per_successful_task_improvement_ratio": None,
+            "optimization_accepted": False,
+            "optimization_decision": "indeterminate",
+            "optimization_decision_reason": "incomplete_cost_data",
+        }
     baseline_cps = baseline_agg["cost_per_successful_task"]
     optimized_cps = optimized_agg["cost_per_successful_task"]
     improvement = None
@@ -563,6 +610,10 @@ def compare_configurations(
         "optimized": optimized_agg,
         "cost_per_successful_task_improvement_ratio": improvement,
         "optimization_accepted": accepted,
+        "optimization_decision": "accepted" if accepted else "rejected",
+        "optimization_decision_reason": (
+            None if accepted else "quality_or_cost_regression"
+        ),
     }
 
 
@@ -634,8 +685,12 @@ def _run_malformed_case(
         run_id_factory=lambda: run_id,
     )
     result = agent.run(RunInput(task=case.task, run_id=run_id))
-    usage_records = tuple(item.usage for item in adapter.observations)
-    cost = aggregate_costs(usage_records, catalog=harness._pricing)
+    usage_records, cost = _resolve_run_usage_and_cost(
+        model_turns=result.model_turns,
+        usage_records=tuple(item.usage for item in adapter.observations),
+        catalog=harness._pricing,
+        run_id=run_id,
+    )
     return AgentRunMetrics(
         case_id=case.case_id,
         category=case.category.value,
@@ -697,6 +752,21 @@ def _eval_tools() -> ToolRegistry:
             ),
         ]
     )
+
+
+def _resolve_run_usage_and_cost(
+    *,
+    model_turns: int,
+    usage_records: tuple[TokenUsage, ...],
+    catalog: PricingCatalog,
+    run_id: str,
+    provider: str = "sequence",
+    model: str = "sequence-v1",
+) -> tuple[tuple[TokenUsage, ...], CostBreakdown]:
+    if model_turns > 0 and not usage_records:
+        unknown = (TokenUsage.unknown(provider=provider, model=model, run_id=run_id),)
+        return unknown, aggregate_costs(unknown, catalog=catalog)
+    return usage_records, aggregate_costs(usage_records, catalog=catalog)
 
 
 def _build_gateway(kind: GatewayKind) -> AllowGateway | BlockGateway | ReviewGateway:
