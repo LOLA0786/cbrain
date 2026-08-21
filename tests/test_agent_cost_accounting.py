@@ -17,7 +17,11 @@ from cbrain.evaluation.agent_harness import (
 )
 from cbrain.evaluation.agent_reporting import render_markdown_summary
 from cbrain.evaluation.agent_suites import AgentEvalCategory
-from cbrain.evaluation.cost import aggregate_costs, cost_is_complete
+from cbrain.evaluation.cost import (
+    aggregate_costs,
+    cost_is_complete,
+    reconcile_usage_with_model_turns,
+)
 from cbrain.evaluation.optimizations import BASELINE_CONFIG, OPTIMIZED_CONFIG
 from cbrain.evaluation.pricing import load_pricing_catalog
 from cbrain.models.usage import (
@@ -122,8 +126,17 @@ def test_unknown_cost_cannot_accept_optimization(catalog) -> None:
 
 
 def test_model_turns_without_usage_produce_unknown_cost(catalog) -> None:
-    unknown = (TokenUsage.unknown(provider="sequence", model="sequence-v1"),)
-    cost = aggregate_costs(unknown, catalog=catalog)
+    reconciled, inconsistency = reconcile_usage_with_model_turns(
+        model_turns=2,
+        usage_records=(),
+        run_id="run-turns",
+    )
+    assert inconsistency is None
+    assert len(reconciled) == 2
+    cost = aggregate_costs(reconciled, catalog=catalog)
+    assert cost.status == "cost_unknown"
+    assert cost.total_cost is None
+
     run = AgentRunMetrics(
         case_id="turns-no-usage",
         category="concurrent_resume",
@@ -138,7 +151,7 @@ def test_model_turns_without_usage_produce_unknown_cost(catalog) -> None:
         model_turns=2,
         tool_calls=1,
         observed_status=RunStatus.COMPLETED,
-        usage_records=unknown,
+        usage_records=reconciled,
         cost=cost,
         latencies_ms=(1.0,),
         budget_violation=False,
@@ -150,22 +163,18 @@ def test_model_turns_without_usage_produce_unknown_cost(catalog) -> None:
     assert agg["cost_per_run"] is None
 
 
-def test_concurrent_resume_case_records_usage_or_unknown(catalog) -> None:
+def test_concurrent_resume_captures_exactly_two_usage_records(catalog) -> None:
     harness = AgentEvalHarness(catalog=catalog)
     case = next(
         c for c in harness._cases if c.category is AgentEvalCategory.CONCURRENT_RESUME
     )
     metrics = harness._run_concurrent_resume_case(case, config=BASELINE_CONFIG)
-    assert metrics.model_turns > 0
-    if not metrics.usage_records:
-        assert metrics.cost.status == "cost_unknown"
-        assert metrics.cost.total_cost is None
-    else:
-        assert any(
-            record.source is not UsageSource.UNKNOWN
-            or record.source is UsageSource.UNKNOWN
-            for record in metrics.usage_records
-        )
+    assert metrics.model_turns == 2
+    assert len(metrics.usage_records) == metrics.model_turns
+    assert all(record.run_id == metrics.run_id for record in metrics.usage_records)
+    assert metrics.cost.status == "estimated"
+    assert metrics.cost.total_cost is not None
+    assert cost_is_complete(metrics.cost.status)
 
 
 def test_assumed_cache_savings_are_labelled_simulated(catalog) -> None:
@@ -240,6 +249,47 @@ def test_cost_is_complete_helper() -> None:
     assert cost_is_complete("zero_inference") is True
     assert cost_is_complete("partial_unknown") is False
     assert cost_is_complete("cost_unknown") is False
+    assert cost_is_complete("usage_inconsistent") is False
+    assert cost_is_complete("typo_status") is False
+    assert cost_is_complete("") is False
+    assert cost_is_complete("future_status") is False
+
+
+def test_two_turns_zero_records_creates_two_unknown_records(catalog) -> None:
+    reconciled, inconsistency = reconcile_usage_with_model_turns(
+        model_turns=2,
+        usage_records=(),
+        run_id="run-two-zero",
+    )
+    assert inconsistency is None
+    assert len(reconciled) == 2
+    assert all(record.source is UsageSource.UNKNOWN for record in reconciled)
+
+
+def test_two_turns_one_record_adds_one_unknown_record(catalog) -> None:
+    reconciled, inconsistency = reconcile_usage_with_model_turns(
+        model_turns=2,
+        usage_records=(_estimated_usage(),),
+        run_id="run-two-one",
+    )
+    assert inconsistency is None
+    assert len(reconciled) == 2
+    assert reconciled[0].source is UsageSource.ESTIMATED
+    assert reconciled[1].source is UsageSource.UNKNOWN
+    cost = aggregate_costs(reconciled, catalog=catalog)
+    assert cost.status == "partial_unknown"
+    assert cost.total_cost is None
+    assert cost.known_cost_subtotal is not None
+
+
+def test_usage_records_exceeding_model_turns_is_inconsistent(catalog) -> None:
+    reconciled, inconsistency = reconcile_usage_with_model_turns(
+        model_turns=1,
+        usage_records=(_estimated_usage(), _estimated_usage()),
+        run_id="run-excess",
+    )
+    assert inconsistency == "usage_exceeds_model_turns"
+    assert len(reconciled) == 2
 
 
 def test_existing_harness_safety_and_quality_unchanged(catalog) -> None:

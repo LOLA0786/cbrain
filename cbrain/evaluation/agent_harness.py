@@ -45,6 +45,8 @@ from .cost import (
     blended_cost_per_million_tokens,
     cost_is_complete,
     cost_per_successful_task,
+    reconcile_usage_with_model_turns,
+    usage_inconsistent_cost,
 )
 from .optimizations import (
     AgentEvalOptimizationConfig,
@@ -763,10 +765,16 @@ def _resolve_run_usage_and_cost(
     provider: str = "sequence",
     model: str = "sequence-v1",
 ) -> tuple[tuple[TokenUsage, ...], CostBreakdown]:
-    if model_turns > 0 and not usage_records:
-        unknown = (TokenUsage.unknown(provider=provider, model=model, run_id=run_id),)
-        return unknown, aggregate_costs(unknown, catalog=catalog)
-    return usage_records, aggregate_costs(usage_records, catalog=catalog)
+    reconciled, inconsistency = reconcile_usage_with_model_turns(
+        model_turns=model_turns,
+        usage_records=usage_records,
+        run_id=run_id,
+        provider=provider,
+        model=model,
+    )
+    if inconsistency is not None:
+        return reconciled, usage_inconsistent_cost()
+    return reconciled, aggregate_costs(reconciled, catalog=catalog)
 
 
 def _build_gateway(kind: GatewayKind) -> AllowGateway | BlockGateway | ReviewGateway:

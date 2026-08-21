@@ -46,11 +46,59 @@ class CostBreakdown:
 
 
 _MILLION = Decimal("1000000")
-_INCOMPLETE_COST_STATUSES = frozenset({"partial_unknown", "cost_unknown"})
+_COMPLETED_COST_STATUSES = frozenset(
+    {
+        "measured",
+        "estimated",
+        "mixed",
+        "zero_inference",
+    }
+)
 
 
 def cost_is_complete(status: str) -> bool:
-    return status not in _INCOMPLETE_COST_STATUSES
+    return status in _COMPLETED_COST_STATUSES
+
+
+def reconcile_usage_with_model_turns(
+    *,
+    model_turns: int,
+    usage_records: tuple[TokenUsage, ...],
+    run_id: str,
+    provider: str = "sequence",
+    model: str = "sequence-v1",
+) -> tuple[tuple[TokenUsage, ...], str | None]:
+    if isinstance(model_turns, bool) or not isinstance(model_turns, int):
+        raise ValueError("model_turns must be a non-negative integer")
+    if model_turns < 0:
+        raise ValueError("model_turns must be non-negative")
+    if len(usage_records) > model_turns:
+        return usage_records, "usage_exceeds_model_turns"
+    if model_turns == 0:
+        if usage_records:
+            return usage_records, "usage_without_model_turns"
+        return (), None
+    missing = model_turns - len(usage_records)
+    if missing == 0:
+        return usage_records, None
+    padding = tuple(
+        TokenUsage.unknown(provider=provider, model=model, run_id=run_id)
+        for _ in range(missing)
+    )
+    return usage_records + padding, None
+
+
+def usage_inconsistent_cost() -> CostBreakdown:
+    return CostBreakdown(
+        currency=None,
+        input_cost=None,
+        cached_input_cost=None,
+        output_cost=None,
+        reasoning_cost=None,
+        total_cost=None,
+        known_cost_subtotal=None,
+        status="usage_inconsistent",
+    )
 
 
 def cost_for_usage(
@@ -279,4 +327,6 @@ __all__ = [
     "cost_formula_text",
     "cost_is_complete",
     "cost_per_successful_task",
+    "reconcile_usage_with_model_turns",
+    "usage_inconsistent_cost",
 ]
