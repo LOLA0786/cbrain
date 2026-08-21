@@ -6,10 +6,10 @@ import contextlib
 import statistics
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 from cbrain import ActionIntent, ExecutionStatus, GovernedExecution, GovernedRuntime
 from cbrain.agent import (
@@ -21,7 +21,7 @@ from cbrain.agent import (
     RunStatus,
     ToolRegistry,
 )
-from cbrain.agent.durable import DurableRunState
+from cbrain.agent.durable import DurableRunState, StoredRunRecord
 from cbrain.agent.store_memory import InMemoryRunStore
 from cbrain.models import (
     CompletionRequest,
@@ -497,7 +497,12 @@ class CrashSimulation(RuntimeError):
 
 
 class CrashAfterPreparedStore(InMemoryRunStore):
-    def save(self, record, *, expected_version: int):
+    def save(
+        self,
+        record: StoredRunRecord,
+        *,
+        expected_version: int,
+    ) -> StoredRunRecord:
         updated = super().save(record, expected_version=expected_version)
         if updated.durable_state is DurableRunState.TOOL_PREPARED:
             raise CrashSimulation("crash after prepared")
@@ -603,8 +608,8 @@ class InvalidOutputModel:
     def model(self) -> str:
         return "sequence-v1"
 
-    def complete(self, request: CompletionRequest) -> object:
-        return {"invalid": True}
+    def complete(self, request: CompletionRequest) -> TextOutput | ToolCall:
+        return cast(TextOutput | ToolCall, {"invalid": True})
 
 
 def _run_malformed_case(
@@ -694,7 +699,7 @@ def _eval_tools() -> ToolRegistry:
     )
 
 
-def _build_gateway(kind: GatewayKind):
+def _build_gateway(kind: GatewayKind) -> AllowGateway | BlockGateway | ReviewGateway:
     if kind is GatewayKind.BLOCK:
         return BlockGateway()
     if kind is GatewayKind.REVIEW:
@@ -848,7 +853,7 @@ def _failed_metrics(
     )
 
 
-def _accuracy(values: list[bool | None]) -> float | None:
+def _accuracy(values: Sequence[bool | None]) -> float | None:
     filtered = [value for value in values if value is not None]
     if not filtered:
         return None
