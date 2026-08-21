@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "catalog_id": "cbrain-eval-fixture-pricing-v1",
+  "description": "Fixture pricing for offline agent evaluation. Replace this file for live comparisons.",
+  "entries": [
+    {
+      "provider": "sequence",
+      "model": "sequence-v1",
+      "effective_date": "2026-01-01",
+      "currency": "USD",
+      "input_price_per_million": "0.50",
+      "cached_input_price_per_million": "0.10",
+      "output_price_per_million": "1.50",
+      "reasoning_price_per_million": "1.50",
+      "reasoning_token_treatment": "bill_as_output",
+      "source_url": "https://github.com/LOLA0786/cbrain/blob/main/cbrain/evaluation/data/pricing_catalog_v1.json"
+    },
+    {
+      "provider": "sequence",
+      "model": "sequence-cheap-v1",
+      "effective_date": "2026-01-01",
+      "currency": "USD",
+      "input_price_per_million": "0.15",
+      "cached_input_price_per_million": "0.03",
+      "output_price_per_million": "0.45",
+      "reasoning_price_per_million": "0.45",
+      "reasoning_token_treatment": "bill_as_output",
+      "source_url": "https://github.com/LOLA0786/cbrain/blob/main/cbrain/evaluation/data/pricing_catalog_v1.json"
+    }
+  ]
+}

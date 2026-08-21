@@ -51,3 +51,9 @@ def test_model_plan_cli_contains_five_model_tasks_without_credentials(
 def test_live_model_cli_requires_explicit_cost_confirmation() -> None:
     with pytest.raises(SystemExit):
         main(("model-generate",))
+
+
+def test_agent_plan_cli_is_offline(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(("agent-plan",)) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["schema"] == "cbrain-agent-eval-plan/v1"

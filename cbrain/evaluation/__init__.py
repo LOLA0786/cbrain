@@ -1,5 +1,19 @@
 """Scenario catalog and model-decision evaluation harness."""
 
+from .agent_harness import (
+    AgentEvalHarness,
+    AgentRunMetrics,
+    AgentSuiteMetrics,
+    compare_configurations,
+)
+from .agent_reporting import REPORT_SCHEMA as AGENT_EVAL_REPORT_SCHEMA
+from .agent_reporting import AgentEvalManifest
+from .agent_suites import (
+    AgentEvalCase,
+    AgentEvalCategory,
+    default_agent_eval_cases,
+    offline_agent_eval_cases,
+)
 from .catalog import (
     CapabilitySpec,
     Consequence,
@@ -10,6 +24,7 @@ from .catalog import (
     ScenarioStep,
     default_catalog,
 )
+from .cost import CostBreakdown, cost_formula_text
 from .harness import (
     DecisionDivergence,
     DecisionDivergenceError,
@@ -37,9 +52,39 @@ from .model_matrix import (
     default_model_tasks,
     default_tool_bindings,
 )
+from .optimizations import (
+    BASELINE_CONFIG,
+    OPTIMIZED_CONFIG,
+    AgentEvalOptimizationConfig,
+)
+from .pricing import (
+    ModelPricing,
+    PricingCatalog,
+    default_pricing_catalog_path,
+    load_pricing_catalog,
+)
 
 __all__ = [
+    "AGENT_EVAL_REPORT_SCHEMA",
+    "AgentEvalCase",
+    "AgentEvalCategory",
+    "AgentEvalHarness",
+    "AgentEvalManifest",
+    "AgentEvalOptimizationConfig",
+    "AgentRunMetrics",
+    "AgentSuiteMetrics",
+    "BASELINE_CONFIG",
     "CapabilitySpec",
+    "CostBreakdown",
+    "OPTIMIZED_CONFIG",
+    "compare_configurations",
+    "cost_formula_text",
+    "default_agent_eval_cases",
+    "default_pricing_catalog_path",
+    "load_pricing_catalog",
+    "ModelPricing",
+    "PricingCatalog",
+    "offline_agent_eval_cases",
     "Consequence",
     "DecisionDivergence",
     "DecisionDivergenceError",

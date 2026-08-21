@@ -5,10 +5,14 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 from cbrain.models import FiveProviderSettings, build_five_provider_router
 
+from .agent_harness import AgentEvalHarness, compare_configurations
+from .agent_reporting import write_agent_eval_artifacts
+from .agent_suites import default_agent_eval_cases, offline_agent_eval_cases
 from .catalog import Scenario, default_catalog
 from .model_matrix import (
     FiveModelMatrixRunner,
@@ -16,6 +20,8 @@ from .model_matrix import (
     default_model_tasks,
     default_tool_bindings,
 )
+from .optimizations import BASELINE_CONFIG, OPTIMIZED_CONFIG
+from .pricing import default_pricing_catalog_path, load_pricing_catalog
 
 
 def main(arguments: Sequence[str] | None = None) -> int:
@@ -40,6 +46,24 @@ def main(arguments: Sequence[str] | None = None) -> int:
         action="store_true",
         help="Confirm that live, potentially billable provider APIs may be called",
     )
+    subcommands.add_parser(
+        "agent-plan",
+        help="Print offline agent evaluation suites as JSON",
+    )
+    agent_run = subcommands.add_parser(
+        "agent-run",
+        help="Run offline baseline and optimized agent evaluation harness",
+    )
+    agent_run.add_argument(
+        "--output-dir",
+        default="agent-eval-output",
+        help="Directory for JSONL, JSON, CSV, Markdown, and manifest artifacts",
+    )
+    agent_run.add_argument(
+        "--pricing-catalog",
+        default=str(default_pricing_catalog_path()),
+        help="Path to replaceable pricing catalog JSON",
+    )
     parsed = parser.parse_args(arguments)
     catalog = default_catalog()
     exit_code = 0
@@ -50,12 +74,40 @@ def main(arguments: Sequence[str] | None = None) -> int:
         payload = _scenario_payload(scenario_value)
     elif parsed.command == "model-plan":
         payload = _model_plan_payload()
+    elif parsed.command == "agent-plan":
+        payload = _agent_plan_payload()
+    elif parsed.command == "agent-run":
+        pricing_path = Path(parsed.pricing_catalog)
+        pricing = load_pricing_catalog(pricing_path)
+        harness = AgentEvalHarness(catalog=pricing, cases=offline_agent_eval_cases())
+        baseline = harness.run_configuration(BASELINE_CONFIG)
+        optimized = harness.run_configuration(OPTIMIZED_CONFIG)
+        comparison = compare_configurations(
+            baseline=baseline,
+            optimized=optimized,
+            catalog=pricing,
+        )
+        write_agent_eval_artifacts(
+            output_dir=parsed.output_dir,
+            comparison=comparison,
+            catalog=pricing,
+            catalog_path=pricing_path,
+            baseline=baseline,
+            optimized=optimized,
+        )
+        payload = comparison
+        if not comparison["optimization_accepted"]:
+            exit_code = 1
     else:
         if not parsed.confirm_live_api:
             parser.error("model-generate requires --confirm-live-api")
         router = build_five_provider_router(FiveProviderSettings.from_environment())
         report = FiveModelMatrixRunner(router=router, catalog=catalog).run()
         payload = report.to_payload()
+        payload = {
+            **payload,
+            "determinism": "nondeterministic_live_provider",
+        }
         if any(
             item.outcome is ProposalOutcome.CONTROL_FAILURE for item in report.attempts
         ):
@@ -103,6 +155,25 @@ def _model_plan_payload() -> dict[str, Any]:
                 "prompt": task.prompt,
             }
             for task in default_model_tasks()
+        ],
+    }
+
+
+def _agent_plan_payload() -> dict[str, Any]:
+    return {
+        "schema": "cbrain-agent-eval-plan/v1",
+        "determinism": "offline_fixture",
+        "cases": [
+            {
+                "case_id": case.case_id,
+                "category": case.category.value,
+                "title": case.title,
+                "task": case.task,
+                "expected_status": case.expected_status.value,
+                "safety_sensitive": case.safety_sensitive,
+                "requires_durable_store": case.requires_durable_store,
+            }
+            for case in default_agent_eval_cases()
         ],
     }
 
