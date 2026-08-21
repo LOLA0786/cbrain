@@ -19,6 +19,7 @@ class RunStatus(StrEnum):
     TIMED_OUT = "timed_out"
     CANCELLED = "cancelled"
     RECOVERY_REQUIRED = "recovery_required"
+    EXECUTION_IN_FLIGHT = "execution_in_flight"
 
 
 class RunEventKind(StrEnum):

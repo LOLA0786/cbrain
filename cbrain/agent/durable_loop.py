@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 from cbrain.contracts import ActionIntent, ContractError, GovernedExecution
-from cbrain.models import Message, ToolCall
+from cbrain.models import Message, MessageRole, ToolCall
 
 from .contracts import RunEvent, RunInput, RunResult, RunStatus
 from .durable import (
@@ -14,8 +15,10 @@ from .durable import (
     RunStore,
     RunStoreError,
     StoredRunRecord,
+    compute_deadline_monotonic,
     deserialize_event,
     deserialize_message,
+    in_flight_run_result,
     new_running_record,
     profile_fingerprint,
     record_to_run_result,
@@ -29,8 +32,8 @@ from .profile import AgentProfile
 class DurableRunContext:
     run_input: RunInput
     run_id: str
-    started_at: float
-    deadline: float
+    started_at_utc: float
+    deadline_monotonic: float
     events: list[RunEvent]
     messages: list[Message]
     tool_calls: int
@@ -45,8 +48,10 @@ def initialize_durable_run(
     profile: AgentProfile,
     run_input: RunInput,
     run_store: RunStore,
-    started_at: float,
-    deadline: float,
+    started_at_utc: float,
+    expires_at_utc: float,
+    wall_clock: Callable[[], float],
+    monotonic_clock: Callable[[], float],
     run_id: str,
     instructions: str,
     started_event: RunEvent,
@@ -63,8 +68,9 @@ def initialize_durable_run(
         return resume_durable_run(
             profile=profile,
             run_input=run_input,
-            run_store=run_store,
             record=record,
+            wall_clock=wall_clock,
+            monotonic_clock=monotonic_clock,
         )
 
     messages = [
@@ -76,17 +82,22 @@ def initialize_durable_run(
         run_id=run_id,
         profile=profile,
         run_input=run_input,
-        started_at=started_at,
-        deadline=deadline,
+        started_at_utc=started_at_utc,
+        expires_at_utc=expires_at_utc,
         messages=tuple(messages),
         events=tuple(events),
     )
     run_store.create(record)
+    deadline_monotonic = compute_deadline_monotonic(
+        expires_at_utc=expires_at_utc,
+        wall_clock=wall_clock,
+        monotonic_clock=monotonic_clock,
+    )
     return DurableRunContext(
         run_input=run_input,
         run_id=run_id,
-        started_at=started_at,
-        deadline=deadline,
+        started_at_utc=started_at_utc,
+        deadline_monotonic=deadline_monotonic,
         events=events,
         messages=messages,
         tool_calls=0,
@@ -100,8 +111,9 @@ def resume_durable_run(
     *,
     profile: AgentProfile,
     run_input: RunInput,
-    run_store: RunStore,
     record: StoredRunRecord,
+    wall_clock: Callable[[], float],
+    monotonic_clock: Callable[[], float],
 ) -> DurableRunContext | RunResult:
     if profile_fingerprint(profile) != record.profile_fingerprint:
         raise RunStoreError("agent profile fingerprint mismatch")
@@ -117,24 +129,19 @@ def resume_durable_run(
         return record_to_run_result(record)
 
     if record.durable_state is DurableRunState.TOOL_IN_FLIGHT:
-        terminal = finalize_durable_record(
-            record,
-            durable_state=DurableRunState.RECOVERY_REQUIRED,
-            terminal_status=RunStatus.RECOVERY_REQUIRED,
-            terminal_metadata={
-                **dict(record.run_metadata),
-                "reason": "tool was in-flight without a durable completion record",
-            },
-        )
-        run_store.save(terminal, expected_version=record.version)
-        return record_to_run_result(run_store.load(record.run_id))
+        return in_flight_run_result(record)
 
     merge_completed_tool = record.durable_state is DurableRunState.TOOL_COMPLETED
+    deadline_monotonic = compute_deadline_monotonic(
+        expires_at_utc=record.expires_at_utc,
+        wall_clock=wall_clock,
+        monotonic_clock=monotonic_clock,
+    )
     return DurableRunContext(
         run_input=run_input,
         run_id=record.run_id,
-        started_at=record.started_at,
-        deadline=record.deadline,
+        started_at_utc=record.started_at_utc,
+        deadline_monotonic=deadline_monotonic,
         events=[deserialize_event(item) for item in record.events],
         messages=[deserialize_message(item) for item in record.messages],
         tool_calls=record.tool_calls,
@@ -142,6 +149,26 @@ def resume_durable_run(
         next_step=record.next_step,
         record=record,
         merge_completed_tool=merge_completed_tool,
+    )
+
+
+def resolve_claim_conflict(run_store: RunStore, run_id: str) -> RunResult:
+    current = run_store.load(run_id)
+    if current.durable_state in {
+        DurableRunState.COMPLETED,
+        DurableRunState.FAILED,
+        DurableRunState.CANCELLED,
+        DurableRunState.RECOVERY_REQUIRED,
+    }:
+        return record_to_run_result(current)
+    if current.durable_state is DurableRunState.TOOL_IN_FLIGHT:
+        return in_flight_run_result(
+            current,
+            reason="another worker claimed tool dispatch",
+        )
+    return in_flight_run_result(
+        current,
+        reason="tool dispatch claim conflict",
     )
 
 
@@ -176,8 +203,8 @@ def persist_record(
         profile_fingerprint=record.profile_fingerprint,
         task=record.task,
         run_metadata=record.run_metadata,
-        started_at=record.started_at,
-        deadline=record.deadline,
+        started_at_utc=record.started_at_utc,
+        expires_at_utc=record.expires_at_utc,
         next_step=next_step if next_step is not None else record.next_step,
         tool_calls=tool_calls if tool_calls is not None else record.tool_calls,
         model_turns=model_turns if model_turns is not None else record.model_turns,
@@ -294,8 +321,8 @@ def finalize_durable_record(
         profile_fingerprint=record.profile_fingerprint,
         task=record.task,
         run_metadata=record.run_metadata,
-        started_at=record.started_at,
-        deadline=record.deadline,
+        started_at_utc=record.started_at_utc,
+        expires_at_utc=record.expires_at_utc,
         next_step=record.next_step,
         tool_calls=tool_calls if tool_calls is not None else record.tool_calls,
         model_turns=model_turns if model_turns is not None else record.model_turns,
@@ -366,14 +393,12 @@ def restore_execution(record: StoredRunRecord) -> GovernedExecution:
     )
 
 
-# Late import avoids circular dependency during module load.
-from cbrain.models import MessageRole  # noqa: E402
-
 __all__ = [
     "DurableRunContext",
     "finalize_durable_record",
     "initialize_durable_run",
     "persist_record",
+    "resolve_claim_conflict",
     "restore_action",
     "restore_execution",
     "restore_tool_call",
