@@ -18,6 +18,7 @@ class RunStatus(StrEnum):
     LIMIT_REACHED = "limit_reached"
     TIMED_OUT = "timed_out"
     CANCELLED = "cancelled"
+    RECOVERY_REQUIRED = "recovery_required"
 
 
 class RunEventKind(StrEnum):
