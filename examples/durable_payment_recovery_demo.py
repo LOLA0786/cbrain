@@ -164,9 +164,9 @@ def main() -> None:
     )
 
     assert handler_calls["count"] == 0
-    assert result.status is RunStatus.RECOVERY_REQUIRED
+    assert result.status is RunStatus.EXECUTION_IN_FLIGHT
     persisted = store.load("demo-payment-run")
-    assert persisted.durable_state is DurableRunState.RECOVERY_REQUIRED
+    assert persisted.durable_state is DurableRunState.TOOL_IN_FLIGHT
 
 
 if __name__ == "__main__":

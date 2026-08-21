@@ -28,6 +28,7 @@ from .durable_loop import (
     finalize_durable_record,
     initialize_durable_run,
     persist_record,
+    resolve_claim_conflict,
     restore_action,
     restore_execution,
     restore_tool_call,
@@ -48,7 +49,7 @@ class FoundationAgent:
     handler is not interrupted.
 
     The injected ``clock`` must be monotonic (for example ``time.monotonic``).
-    Wall-clock time can move backwards and break deadline enforcement.
+    Durable runs persist an absolute UTC expiration via ``wall_clock``.
 
     One ``FoundationAgent`` instance may be reused across sequential runs, but
     concurrent ``run()`` calls on the same instance are not supported.
@@ -67,6 +68,7 @@ class FoundationAgent:
         request_id_factory: Callable[[str, int], str] | None = None,
         cancelled: Callable[[], bool] | None = None,
         run_store: RunStore | None = None,
+        wall_clock: Callable[[], float] | None = None,
     ) -> None:
         self._profile = profile
         self._runtime = runtime
@@ -74,6 +76,7 @@ class FoundationAgent:
         self._tools = tools
         self._handlers = dict(handlers)
         self._clock = clock or time.monotonic
+        self._wall_clock = wall_clock or time.time
         self._run_id_factory = run_id_factory or (lambda: str(uuid.uuid4()))
         self._request_id_factory = request_id_factory or (
             lambda run_id, step: f"{run_id}-step-{step}"
@@ -454,8 +457,9 @@ class FoundationAgent:
 
         limits = self._profile.limits
         run_id = run_input.run_id or self._run_id_factory()
-        started_at = self._clock()
-        deadline = started_at + float(self._profile.timeout_seconds)
+        started_at_utc = self._wall_clock()
+        expires_at_utc = started_at_utc + float(self._profile.timeout_seconds)
+        started_at_monotonic = self._clock()
 
         if len(run_input.task) > limits.max_task_chars:
             return self._failed(
@@ -473,7 +477,7 @@ class FoundationAgent:
         started_event = RunEvent(
             kind=RunEventKind.RUN_STARTED,
             step=0,
-            timestamp=started_at,
+            timestamp=started_at_monotonic,
             detail=_snapshot_detail({"run_id": run_id}),
         )
         try:
@@ -485,8 +489,10 @@ class FoundationAgent:
                     metadata=run_input.metadata,
                 ),
                 run_store=self._run_store,
-                started_at=started_at,
-                deadline=deadline,
+                started_at_utc=started_at_utc,
+                expires_at_utc=expires_at_utc,
+                wall_clock=self._wall_clock,
+                monotonic_clock=self._clock,
                 run_id=run_id,
                 instructions=self._profile.instructions,
                 started_event=started_event,
@@ -520,7 +526,7 @@ class FoundationAgent:
                 return self._persist_terminal(ctx, status=RunStatus.CANCELLED)
 
             now = self._clock()
-            if now > ctx.deadline:
+            if now > ctx.deadline_monotonic:
                 return self._persist_terminal(ctx, status=RunStatus.TIMED_OUT)
 
             if len(ctx.messages) > limits.max_context_messages:
@@ -599,14 +605,6 @@ class FoundationAgent:
                         step=step,
                         timestamp=self._clock(),
                         detail=_snapshot_detail({"kind": "text"}),
-                    )
-                )
-                ctx.events.append(
-                    RunEvent(
-                        kind=RunEventKind.RUN_COMPLETED,
-                        step=step,
-                        timestamp=self._clock(),
-                        detail=_snapshot_detail({"run_id": run_id}),
                     )
                 )
                 return self._persist_terminal(
@@ -767,21 +765,7 @@ class FoundationAgent:
                 expected_version=ctx.record.version,
             )
             if claimed is None:
-                terminal = finalize_durable_record(
-                    ctx.record,
-                    durable_state=DurableRunState.RECOVERY_REQUIRED,
-                    terminal_status=RunStatus.RECOVERY_REQUIRED,
-                    terminal_metadata={
-                        **dict(ctx.record.run_metadata),
-                        "reason": "concurrent tool dispatch claim failed",
-                    },
-                    events=ctx.events,
-                    messages=ctx.messages,
-                    tool_calls=ctx.tool_calls,
-                    model_turns=ctx.model_turns,
-                )
-                self._run_store.save(terminal, expected_version=ctx.record.version)
-                return record_to_run_result(self._run_store.load(ctx.run_id))
+                return resolve_claim_conflict(self._run_store, ctx.run_id)
 
             ctx.record = claimed
             handler = self._handlers[output.name]

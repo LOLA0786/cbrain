@@ -9,6 +9,7 @@ from .durable import (
     DurableRunState,
     RunStoreError,
     StoredRunRecord,
+    validate_record_columns,
 )
 
 _SCHEMA = """
@@ -21,13 +22,24 @@ CREATE TABLE IF NOT EXISTS durable_runs (
 );
 """
 
+_DEFAULT_BUSY_TIMEOUT_SECONDS = 5.0
+
 
 class SQLiteRunStore:
     """Crash-safe durable run store backed by SQLite."""
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        busy_timeout_seconds: float = _DEFAULT_BUSY_TIMEOUT_SECONDS,
+    ) -> None:
         self._path = str(path)
-        self._connection = sqlite3.connect(self._path, isolation_level=None)
+        self._connection = sqlite3.connect(
+            self._path,
+            isolation_level=None,
+            timeout=busy_timeout_seconds,
+        )
         self._connection.execute("PRAGMA journal_mode=WAL")
         self._connection.executescript(_SCHEMA)
 
@@ -55,15 +67,26 @@ class SQLiteRunStore:
 
     def load(self, run_id: str) -> StoredRunRecord:
         row = self._connection.execute(
-            "SELECT record_json FROM durable_runs WHERE run_id = ?",
+            """
+            SELECT schema_version, version, durable_state, record_json
+            FROM durable_runs
+            WHERE run_id = ?
+            """,
             (run_id,),
         ).fetchone()
         if row is None:
             raise RunStoreError(f"unknown run {run_id!r}")
-        raw = row[0]
+        schema_version, version, durable_state, raw = row
         if not isinstance(raw, str):
             raise RunStoreError("stored run record is corrupted")
-        return StoredRunRecord.from_json(raw)
+        record = StoredRunRecord.from_json(raw)
+        validate_record_columns(
+            record,
+            schema_version=schema_version,
+            version=version,
+            durable_state=durable_state,
+        )
+        return record
 
     def save(
         self,
@@ -79,8 +102,8 @@ class SQLiteRunStore:
             profile_fingerprint=record.profile_fingerprint,
             task=record.task,
             run_metadata=record.run_metadata,
-            started_at=record.started_at,
-            deadline=record.deadline,
+            started_at_utc=record.started_at_utc,
+            expires_at_utc=record.expires_at_utc,
             next_step=record.next_step,
             tool_calls=record.tool_calls,
             model_turns=record.model_turns,
@@ -101,10 +124,11 @@ class SQLiteRunStore:
         cursor = self._connection.execute(
             """
             UPDATE durable_runs
-            SET version = ?, durable_state = ?, record_json = ?
+            SET schema_version = ?, version = ?, durable_state = ?, record_json = ?
             WHERE run_id = ? AND version = ?
             """,
             (
+                updated.schema_version,
                 updated.version,
                 updated.durable_state.value,
                 updated.to_json(),
@@ -126,7 +150,7 @@ class SQLiteRunStore:
         try:
             row = self._connection.execute(
                 """
-                SELECT version, durable_state, record_json
+                SELECT schema_version, version, durable_state, record_json
                 FROM durable_runs
                 WHERE run_id = ?
                 """,
@@ -134,12 +158,21 @@ class SQLiteRunStore:
             ).fetchone()
             if row is None:
                 raise RunStoreError(f"unknown run {run_id!r}")
-            version, durable_state, raw = row
+            schema_version, version, durable_state, raw = row
             prepared_state = DurableRunState.TOOL_PREPARED.value
             if version != expected_version or durable_state != prepared_state:
                 self._connection.execute("ROLLBACK")
                 return None
+            if not isinstance(raw, str):
+                self._connection.execute("ROLLBACK")
+                raise RunStoreError("stored run record is corrupted")
             record = StoredRunRecord.from_json(raw)
+            validate_record_columns(
+                record,
+                schema_version=schema_version,
+                version=version,
+                durable_state=durable_state,
+            )
             updated = StoredRunRecord(
                 schema_version=record.schema_version,
                 version=expected_version + 1,
@@ -148,8 +181,8 @@ class SQLiteRunStore:
                 profile_fingerprint=record.profile_fingerprint,
                 task=record.task,
                 run_metadata=record.run_metadata,
-                started_at=record.started_at,
-                deadline=record.deadline,
+                started_at_utc=record.started_at_utc,
+                expires_at_utc=record.expires_at_utc,
                 next_step=record.next_step,
                 tool_calls=record.tool_calls,
                 model_turns=record.model_turns,
@@ -170,10 +203,11 @@ class SQLiteRunStore:
             cursor = self._connection.execute(
                 """
                 UPDATE durable_runs
-                SET version = ?, durable_state = ?, record_json = ?
+                SET schema_version = ?, version = ?, durable_state = ?, record_json = ?
                 WHERE run_id = ? AND version = ?
                 """,
                 (
+                    updated.schema_version,
                     updated.version,
                     updated.durable_state.value,
                     updated.to_json(),

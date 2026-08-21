@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
+import math
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Protocol
@@ -14,7 +15,7 @@ from cbrain.models import Message, MessageRole
 from .contracts import RunEvent, RunEventKind, RunInput, RunResult, RunStatus
 from .profile import AgentProfile
 
-STORE_SCHEMA_VERSION = 1
+STORE_SCHEMA_VERSION = 2
 
 
 class RunStoreError(ValueError):
@@ -41,6 +42,14 @@ _TERMINAL_DURABLE = frozenset(
     }
 )
 
+_PENDING_TOOL_STATES = frozenset(
+    {
+        DurableRunState.TOOL_PREPARED,
+        DurableRunState.TOOL_IN_FLIGHT,
+        DurableRunState.TOOL_COMPLETED,
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class StoredRunRecord:
@@ -51,8 +60,8 @@ class StoredRunRecord:
     profile_fingerprint: str
     task: str
     run_metadata: Mapping[str, Any]
-    started_at: float
-    deadline: float
+    started_at_utc: float
+    expires_at_utc: float
     next_step: int
     tool_calls: int
     model_turns: int
@@ -79,8 +88,8 @@ class StoredRunRecord:
             "profile_fingerprint": self.profile_fingerprint,
             "task": self.task,
             "run_metadata": dict(self.run_metadata),
-            "started_at": self.started_at,
-            "deadline": self.deadline,
+            "started_at_utc": self.started_at_utc,
+            "expires_at_utc": self.expires_at_utc,
             "next_step": self.next_step,
             "tool_calls": self.tool_calls,
             "model_turns": self.model_turns,
@@ -139,6 +148,16 @@ class RunStore(Protocol):
     ) -> StoredRunRecord | None: ...
 
 
+def compute_deadline_monotonic(
+    *,
+    expires_at_utc: float,
+    wall_clock: Callable[[], float],
+    monotonic_clock: Callable[[], float],
+) -> float:
+    remaining = expires_at_utc - wall_clock()
+    return monotonic_clock() + max(0.0, remaining)
+
+
 def profile_fingerprint(profile: AgentProfile) -> str:
     limits = profile.limits
     payload = {
@@ -175,8 +194,12 @@ def deserialize_message(payload: Mapping[str, Any]) -> Message:
     content = payload.get("content")
     if not isinstance(role, str) or not isinstance(content, str):
         raise RunStoreError("stored message is invalid")
+    try:
+        message_role = MessageRole(role)
+    except ValueError as exc:
+        raise RunStoreError("stored message role is invalid") from exc
     return Message(
-        role=MessageRole(role),
+        role=message_role,
         content=content,
         tool_call_id=payload.get("tool_call_id"),
         tool_name=payload.get("tool_name"),
@@ -197,17 +220,20 @@ def deserialize_event(payload: Mapping[str, Any]) -> RunEvent:
     step = payload.get("step")
     timestamp = payload.get("timestamp")
     detail = payload.get("detail")
-    if (
-        not isinstance(kind, str)
-        or not isinstance(step, int)
-        or not isinstance(timestamp, (int, float))
-        or not isinstance(detail, Mapping)
-    ):
-        raise RunStoreError("stored event is invalid")
+    if not isinstance(kind, str):
+        raise RunStoreError("stored event kind is invalid")
+    step_value = _non_negative_int(step, "event step", minimum=0)
+    timestamp_value = _finite_number(timestamp, "event timestamp")
+    if not isinstance(detail, Mapping):
+        raise RunStoreError("stored event detail is invalid")
+    try:
+        event_kind = RunEventKind(kind)
+    except ValueError as exc:
+        raise RunStoreError("stored event kind is invalid") from exc
     return RunEvent(
-        kind=RunEventKind(kind),
-        step=step,
-        timestamp=float(timestamp),
+        kind=event_kind,
+        step=step_value,
+        timestamp=timestamp_value,
         detail=dict(detail),
     )
 
@@ -228,72 +254,103 @@ def record_to_run_result(record: StoredRunRecord) -> RunResult:
     )
 
 
+def in_flight_run_result(
+    record: StoredRunRecord,
+    *,
+    reason: str = "tool execution is in flight or its outcome is unknown",
+) -> RunResult:
+    events = tuple(deserialize_event(item) for item in record.events)
+    metadata = {**dict(record.run_metadata), "reason": reason}
+    return RunResult(
+        run_id=record.run_id,
+        status=RunStatus.EXECUTION_IN_FLIGHT,
+        final_text=None,
+        tool_calls=record.tool_calls,
+        model_turns=record.model_turns,
+        events=events,
+        metadata=metadata,
+    )
+
+
+def observe_loaded_run(record: StoredRunRecord) -> RunResult:
+    if record.durable_state in _TERMINAL_DURABLE:
+        return record_to_run_result(record)
+    if record.durable_state is DurableRunState.TOOL_IN_FLIGHT:
+        return in_flight_run_result(record)
+    raise RunStoreError(
+        f"cannot observe non-terminal run in durable state {record.durable_state.value}"
+    )
+
+
 def from_mapping(payload: Mapping[str, Any]) -> StoredRunRecord:
     schema_version = payload.get("schema_version")
     if schema_version != STORE_SCHEMA_VERSION:
         raise RunStoreError(
             f"unsupported stored run schema version: {schema_version!r}"
         )
-    version = payload.get("version")
-    run_id = payload.get("run_id")
-    durable_state = payload.get("durable_state")
-    profile_fingerprint = payload.get("profile_fingerprint")
-    task = payload.get("task")
-    run_metadata = payload.get("run_metadata")
-    started_at = payload.get("started_at")
-    deadline = payload.get("deadline")
-    next_step = payload.get("next_step")
-    tool_calls = payload.get("tool_calls")
-    model_turns = payload.get("model_turns")
-    messages = payload.get("messages")
-    events = payload.get("events")
-    if (
-        not isinstance(version, int)
-        or version < 0
-        or not isinstance(run_id, str)
-        or not run_id.strip()
-        or not isinstance(durable_state, str)
-        or not isinstance(profile_fingerprint, str)
-        or not isinstance(task, str)
-        or not isinstance(run_metadata, dict)
-        or not isinstance(started_at, (int, float))
-        or not isinstance(deadline, (int, float))
-        or not isinstance(next_step, int)
-        or not isinstance(tool_calls, int)
-        or not isinstance(model_turns, int)
-        or not isinstance(messages, list)
-        or not isinstance(events, list)
-    ):
-        raise RunStoreError("stored run record is incomplete or inconsistent")
+    version = _non_negative_int(payload.get("version"), "version", minimum=0)
+    run_id = _required_text(payload.get("run_id"), "run_id")
+    durable_state_raw = payload.get("durable_state")
+    if not isinstance(durable_state_raw, str):
+        raise RunStoreError("durable_state must be a string")
     try:
-        state = DurableRunState(durable_state)
+        state = DurableRunState(durable_state_raw)
     except ValueError as exc:
-        raise RunStoreError(f"unknown durable state {durable_state!r}") from exc
-    terminal_status_raw = payload.get("terminal_status")
-    terminal_status = (
-        RunStatus(terminal_status_raw) if isinstance(terminal_status_raw, str) else None
+        raise RunStoreError(f"unknown durable state {durable_state_raw!r}") from exc
+    profile_fp = _required_text(
+        payload.get("profile_fingerprint"), "profile_fingerprint"
     )
+    task = _required_text(payload.get("task"), "task")
+    run_metadata = payload.get("run_metadata")
+    if not isinstance(run_metadata, dict):
+        raise RunStoreError("run_metadata must be a mapping")
+    started_at_utc = _finite_number(payload.get("started_at_utc"), "started_at_utc")
+    expires_at_utc = _finite_number(payload.get("expires_at_utc"), "expires_at_utc")
+    next_step = _non_negative_int(payload.get("next_step"), "next_step", minimum=1)
+    tool_calls = _non_negative_int(payload.get("tool_calls"), "tool_calls", minimum=0)
+    model_turns = _non_negative_int(
+        payload.get("model_turns"), "model_turns", minimum=0
+    )
+    messages_raw = payload.get("messages")
+    events_raw = payload.get("events")
+    if not isinstance(messages_raw, list) or not isinstance(events_raw, list):
+        raise RunStoreError("messages and events must be lists")
+    messages = _validate_message_list(messages_raw)
+    events = _validate_event_list(events_raw)
+    terminal_status_raw = payload.get("terminal_status")
+    terminal_status = None
+    if terminal_status_raw is not None:
+        if not isinstance(terminal_status_raw, str):
+            raise RunStoreError("terminal_status must be a string")
+        try:
+            terminal_status = RunStatus(terminal_status_raw)
+        except ValueError as exc:
+            raise RunStoreError("terminal_status is invalid") from exc
     terminal_metadata = payload.get("terminal_metadata")
     if terminal_metadata is not None and not isinstance(terminal_metadata, dict):
         raise RunStoreError("terminal_metadata must be a mapping")
     pending_action = payload.get("pending_action")
     if pending_action is not None and not isinstance(pending_action, dict):
         raise RunStoreError("pending_action must be a mapping")
-    return StoredRunRecord(
+    final_text_raw = payload.get("final_text")
+    final_text = None
+    if final_text_raw is not None:
+        final_text = _optional_str(final_text_raw)
+    record = StoredRunRecord(
         schema_version=schema_version,
         version=version,
         run_id=run_id,
         durable_state=state,
-        profile_fingerprint=profile_fingerprint,
+        profile_fingerprint=profile_fp,
         task=task,
         run_metadata=run_metadata,
-        started_at=float(started_at),
-        deadline=float(deadline),
+        started_at_utc=started_at_utc,
+        expires_at_utc=expires_at_utc,
         next_step=next_step,
         tool_calls=tool_calls,
         model_turns=model_turns,
-        messages=tuple(item for item in messages if isinstance(item, dict)),
-        events=tuple(item for item in events if isinstance(item, dict)),
+        messages=messages,
+        events=events,
         pending_request_id=_optional_str(payload.get("pending_request_id")),
         pending_idempotency_key=_optional_str(payload.get("pending_idempotency_key")),
         pending_action=pending_action,
@@ -303,17 +360,26 @@ def from_mapping(payload: Mapping[str, Any]) -> StoredRunRecord:
         pending_execution_output=payload.get("pending_execution_output"),
         pending_execution_reason=_optional_str(payload.get("pending_execution_reason")),
         terminal_status=terminal_status,
-        final_text=_optional_str(payload.get("final_text")),
+        final_text=final_text,
         terminal_metadata=terminal_metadata,
     )
+    _validate_state_fields(record)
+    return record
 
 
-def _optional_str(value: object) -> str | None:
-    if value is None:
-        return None
-    if not isinstance(value, str) or not value.strip():
-        raise RunStoreError("expected non-empty string field")
-    return value
+def validate_record_columns(
+    record: StoredRunRecord,
+    *,
+    schema_version: int,
+    version: int,
+    durable_state: str,
+) -> None:
+    if record.schema_version != schema_version:
+        raise RunStoreError("schema_version column mismatch")
+    if record.version != version:
+        raise RunStoreError("version column mismatch")
+    if record.durable_state.value != durable_state:
+        raise RunStoreError("durable_state column mismatch")
 
 
 def new_running_record(
@@ -321,8 +387,8 @@ def new_running_record(
     run_id: str,
     profile: AgentProfile,
     run_input: RunInput,
-    started_at: float,
-    deadline: float,
+    started_at_utc: float,
+    expires_at_utc: float,
     messages: tuple[Message, ...],
     events: tuple[RunEvent, ...],
 ) -> StoredRunRecord:
@@ -334,8 +400,8 @@ def new_running_record(
         profile_fingerprint=profile_fingerprint(profile),
         task=run_input.task,
         run_metadata=dict(run_input.metadata or {}),
-        started_at=started_at,
-        deadline=deadline,
+        started_at_utc=started_at_utc,
+        expires_at_utc=expires_at_utc,
         next_step=1,
         tool_calls=0,
         model_turns=0,
@@ -344,18 +410,97 @@ def new_running_record(
     )
 
 
+def _validate_message_list(messages: list[Any]) -> tuple[Mapping[str, Any], ...]:
+    validated: list[Mapping[str, Any]] = []
+    for index, item in enumerate(messages):
+        if not isinstance(item, dict):
+            raise RunStoreError(f"message at index {index} is invalid")
+        validated.append(dict(item))
+    return tuple(validated)
+
+
+def _validate_event_list(events: list[Any]) -> tuple[Mapping[str, Any], ...]:
+    validated: list[Mapping[str, Any]] = []
+    for index, item in enumerate(events):
+        if not isinstance(item, dict):
+            raise RunStoreError(f"event at index {index} is invalid")
+        validated.append(dict(item))
+    return tuple(validated)
+
+
+def _validate_state_fields(record: StoredRunRecord) -> None:
+    if record.durable_state in _TERMINAL_DURABLE:
+        if record.terminal_status is None:
+            raise RunStoreError("terminal run missing terminal_status")
+        return
+    if record.terminal_status is not None:
+        raise RunStoreError("non-terminal run must not include terminal_status")
+    if record.durable_state in _PENDING_TOOL_STATES:
+        for field_name in (
+            "pending_request_id",
+            "pending_idempotency_key",
+            "pending_action",
+            "pending_tool_call_id",
+            "pending_tool_name",
+        ):
+            if getattr(record, field_name) is None:
+                raise RunStoreError(
+                    f"{record.durable_state.value} requires {field_name}"
+                )
+    if (
+        record.durable_state is DurableRunState.TOOL_COMPLETED
+        and record.pending_execution_status is None
+    ):
+        raise RunStoreError("TOOL_COMPLETED requires pending_execution_status")
+
+
+def _finite_number(value: object, field_name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise RunStoreError(f"{field_name} must be a finite number")
+    number = float(value)
+    if not math.isfinite(number):
+        raise RunStoreError(f"{field_name} must be finite")
+    return number
+
+
+def _non_negative_int(value: object, field_name: str, *, minimum: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise RunStoreError(f"{field_name} must be an integer")
+    if value < minimum:
+        raise RunStoreError(f"{field_name} must be >= {minimum}")
+    return value
+
+
+def _required_text(value: object, field_name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise RunStoreError(f"{field_name} must be a non-empty string")
+    return value
+
+
+def _optional_str(value: object) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise RunStoreError("expected non-empty string field")
+    return value
+
+
 __all__ = [
     "DurableRunState",
     "RunStore",
     "RunStoreError",
     "STORE_SCHEMA_VERSION",
     "StoredRunRecord",
+    "compute_deadline_monotonic",
     "deserialize_event",
     "deserialize_message",
     "from_mapping",
+    "in_flight_run_result",
     "new_running_record",
+    "observe_loaded_run",
     "profile_fingerprint",
     "record_to_run_result",
     "serialize_event",
     "serialize_message",
+    "validate_record_columns",
 ]
