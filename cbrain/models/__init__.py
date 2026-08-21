@@ -17,6 +17,7 @@ from .contracts import (
     ToolDefinition,
 )
 from .google import GoogleAdapter
+from .instrumented import CompletionObservation, InstrumentedModelAdapter
 from .openai_compatible import OpenAICompatibleAdapter
 from .router import (
     ANTHROPIC_ROUTE,
@@ -36,6 +37,7 @@ from .transport import (
     HttpsJsonModelTransport,
     JsonModelTransport,
 )
+from .usage import TokenUsage, TokenUsageTotals, UsageContractError, UsageSource
 
 __all__ = [
     "ANTHROPIC_ROUTE",
@@ -51,6 +53,8 @@ __all__ = [
     "GoogleAdapter",
     "HeadersProvider",
     "HttpsJsonModelTransport",
+    "InstrumentedModelAdapter",
+    "CompletionObservation",
     "JsonModelTransport",
     "Message",
     "MessageRole",
@@ -67,5 +71,9 @@ __all__ = [
     "TextOutput",
     "ToolCall",
     "ToolDefinition",
+    "TokenUsage",
+    "TokenUsageTotals",
+    "UsageContractError",
+    "UsageSource",
     "build_five_provider_router",
 ]
