@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -29,8 +30,14 @@ from cbrain.company.reasons import (
 from cbrain.company.simulators import load_fixture_bundle
 from cbrain.contracts import ActionIntent, ExecutionStatus
 from cbrain.evaluation.cli import main
-from cbrain.evaluation.company_gates import evaluate_release_gates
-from cbrain.evaluation.company_harness import CompanyEvalHarness
+from cbrain.evaluation.company_gates import ReleaseGateResult, evaluate_release_gates
+from cbrain.evaluation.company_harness import (
+    CompanyEvalHarness,
+    CompanySuiteMetrics,
+    action_intent_decision_divergence_count,
+    canonical_action_intent_digest,
+)
+from cbrain.evaluation.company_reporting import render_markdown_summary
 from cbrain.evaluation.company_suites import all_company_eval_cases, cases_for_agent
 from cbrain.evaluation.pricing import default_pricing_catalog_path, load_pricing_catalog
 
@@ -357,12 +364,13 @@ def test_company_run_claims_and_counts(tmp_path: Path) -> None:
             str(default_pricing_catalog_path()),
         )
     )
-    assert exit_code == 0
+    assert exit_code == 1
     aggregate = json.loads(
         (output_dir / "aggregate_report.json").read_text(encoding="utf-8")
     )
     manifest = json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))
     summary = (output_dir / "summary.md").read_text(encoding="utf-8")
+    csv_text = (output_dir / "comparison.csv").read_text(encoding="utf-8")
     runs = [
         json.loads(line)
         for line in (output_dir / "runs.jsonl").read_text(encoding="utf-8").splitlines()
@@ -397,7 +405,13 @@ def test_company_run_claims_and_counts(tmp_path: Path) -> None:
     }
     assert "cost evaluation" in summary.lower()
     gates = aggregate["release_gates"]
-    assert gates["passed"] is True
+    divergence = aggregate["aggregate"]["decision_divergence_count"]
+    assert divergence == gates["metrics"]["decision_divergence_count"]
+    assert f"decision_divergence_count,{divergence}" in csv_text.replace(" ", "")
+    assert gates["passed"] is False
+    assert any("decision divergence" in item for item in gates["failures"])
+    assert "zero decision divergence" not in summary
+    assert f"{divergence} decision-divergence group" in summary
     assert gates["metrics"]["unauthorized_executions"] == 0
     assert gates["metrics"]["approval_bypasses"] == 0
     assert gates["metrics"]["safety_violations"] == 0
@@ -416,8 +430,6 @@ def test_release_gates_still_detect_safety_failure(pricing) -> None:
     )
     metrics = harness.run()
     poisoned = metrics.runs[0]
-    from dataclasses import replace
-
     bad = replace(metrics, runs=(replace(poisoned, safety_violation=True),))
     gates = evaluate_release_gates(bad)
     assert gates.passed is False
@@ -437,3 +449,122 @@ def test_scenario_expectations_match_hardened_policy() -> None:
         if case.expected_decision.value == "block":
             assert case.expected_status is RunStatus.REJECTED
             assert case.expect_state_mutation is False
+
+
+def _sample_run(pricing):
+    harness = CompanyEvalHarness(
+        catalog=pricing,
+        cases=cases_for_agent(CompanyAgentKind.GTM)[:1],
+        model_routes=("offline",),
+    )
+    return harness.run().runs[0]
+
+
+def test_canonical_digest_ignores_mutable_metadata() -> None:
+    shared = {
+        "agent_id": "legal-agent",
+        "framework": "cbrain-foundation",
+        "tool_name": "extract_clause",
+        "capability": "legal.extract",
+        "arguments": {"contract_id": "ctr-b1", "clause_id": "c1"},
+    }
+    left = ActionIntent.capture(
+        **shared,
+        request_id="req-1",
+        timestamp=1.0,
+        context={"run_id": "company-a-offline", "tool_call_id": "legal-8"},
+    )
+    right = ActionIntent.capture(
+        **shared,
+        request_id="req-2",
+        timestamp=99.0,
+        context={"run_id": "company-b-openai", "tool_call_id": "legal-5"},
+    )
+    other = ActionIntent.capture(
+        **{**shared, "arguments": {"contract_id": "ctr-v1", "clause_id": "c1"}},
+        request_id="req-3",
+        timestamp=1.0,
+        context={"run_id": "company-a-offline", "tool_call_id": "legal-8"},
+    )
+    assert canonical_action_intent_digest(left) == canonical_action_intent_digest(right)
+    assert canonical_action_intent_digest(left) != canonical_action_intent_digest(other)
+
+
+def test_identical_intents_identical_decisions_have_zero_divergence(pricing) -> None:
+    first = _sample_run(pricing)
+    second = replace(
+        first,
+        case_id="other-case",
+        run_id="other-run",
+        model_route="openai",
+        simulated_route_label="simulated:openai",
+    )
+    metrics = CompanySuiteMetrics(runs=(first, second), decision_divergence_count=9)
+    assert first.action_intent_hash == second.action_intent_hash
+    assert action_intent_decision_divergence_count(metrics.runs) == 0
+    assert metrics.aggregate(catalog=pricing)["decision_divergence_count"] == 0
+    gates = evaluate_release_gates(metrics)
+    assert gates.passed is True
+    assert gates.metrics["decision_divergence_count"] == 0
+
+
+def test_identical_intents_different_decisions_fail_invariance_gate(pricing) -> None:
+    first = _sample_run(pricing)
+    second = replace(
+        first,
+        case_id="other-case",
+        run_id="other-run",
+        observed_decision="block",
+    )
+    metrics = CompanySuiteMetrics(runs=(first, second))
+    assert first.action_intent_hash == second.action_intent_hash
+    assert action_intent_decision_divergence_count(metrics.runs) == 1
+    assert metrics.aggregate(catalog=pricing)["decision_divergence_count"] == 1
+    gates = evaluate_release_gates(metrics)
+    assert gates.passed is False
+    assert gates.metrics["decision_divergence_count"] == 1
+    assert any("decision divergence" in item for item in gates.failures)
+
+
+def test_different_intents_are_not_grouped_as_divergence(pricing) -> None:
+    first = _sample_run(pricing)
+    second = replace(
+        first,
+        action_intent_hash="different-canonical-intent",
+        observed_decision="block",
+    )
+    metrics = CompanySuiteMetrics(runs=(first, second))
+    assert action_intent_decision_divergence_count(metrics.runs) == 0
+    assert evaluate_release_gates(metrics).passed is True
+
+
+def test_summary_never_claims_zero_divergence_when_count_is_nonzero() -> None:
+    aggregate = {
+        "task_success_rate": 1.0,
+        "tool_selection_accuracy": 1.0,
+        "tool_argument_accuracy": 1.0,
+        "citation_grounding_accuracy": 1.0,
+        "unauthorized_execution_count": 0,
+        "approval_bypass_count": 0,
+        "safety_violation_count": 0,
+        "decision_divergence_count": 3,
+        "fixture_conformance": 1.0,
+        "live_provider_calls": 0,
+        "cost_data_complete": False,
+        "cost_evaluation": "not_evaluated",
+        "known_cost_subtotal": None,
+        "unknown_completion_count": 1,
+        "estimated_completion_count": 0,
+        "simulated_cache_completions": 0,
+    }
+    gates = ReleaseGateResult(
+        passed=False,
+        failures=("decision divergence: 3",),
+        metrics={"decision_divergence_count": 3},
+    )
+    summary = render_markdown_summary(
+        aggregate, gates=gates, catalog_path=default_pricing_catalog_path()
+    )
+    assert "zero decision divergence" not in summary
+    assert "3 decision-divergence group" in summary
+    assert "company_test_gateway" in summary
