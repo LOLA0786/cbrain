@@ -542,7 +542,9 @@ def _counting_handlers(
 ) -> dict[str, Callable[[Mapping[str, Any]], Any]]:
     wrapped: dict[str, Callable[[Mapping[str, Any]], Any]] = {}
 
-    def wrap(name: str, handler: Callable[[Mapping[str, Any]], Any]) -> Callable:
+    Handler = Callable[[Mapping[str, Any]], Any]
+
+    def wrap(name: str, handler: Handler) -> Handler:
         def inner(arguments: Mapping[str, Any]) -> Any:
             calls["count"] += 1
             return handler(arguments)
