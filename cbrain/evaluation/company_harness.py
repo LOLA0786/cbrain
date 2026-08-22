@@ -116,13 +116,20 @@ class CompanyRunMetrics:
 @dataclass(frozen=True, slots=True)
 class CompanySuiteMetrics:
     runs: tuple[CompanyRunMetrics, ...]
-    decision_divergence_count: int = 0
 
     @property
     def task_success_rate(self) -> float:
         if not self.runs:
             return 0.0
         return sum(1 for run in self.runs if run.success) / len(self.runs)
+
+    @property
+    def route_invariance(self) -> RouteInvarianceAssessment:
+        return assess_route_invariance(self.runs)
+
+    @property
+    def decision_divergence_count(self) -> int:
+        return self.route_invariance.decision_divergence_count
 
     def aggregate(self, *, catalog: PricingCatalog) -> dict[str, Any]:
         usage_records = tuple(
@@ -156,6 +163,7 @@ class CompanySuiteMetrics:
         ]
         cost_complete = cost_is_complete(total_cost.status)
         usage_payload = aggregate_usage(usage_records).to_payload()
+        invariance = self.route_invariance
         return {
             "task_success_rate": self.task_success_rate,
             "tool_selection_accuracy": _accuracy(tool_selection),
@@ -171,9 +179,9 @@ class CompanySuiteMetrics:
             "duplicate_dispatch_count": sum(
                 run.duplicate_dispatch_count for run in self.runs
             ),
-            "decision_divergence_count": action_intent_decision_divergence_count(
-                self.runs
-            ),
+            "decision_divergence_count": invariance.decision_divergence_count,
+            "incomplete_route_comparison_count": invariance.incomplete_comparison_count,
+            "not_applicable_route_comparison_count": invariance.not_applicable_count,
             "model_turns": sum(run.model_turns for run in self.runs),
             "tool_calls": sum(run.tool_calls for run in self.runs),
             "usage": usage_payload,
@@ -237,11 +245,7 @@ class CompanyEvalHarness:
         for case in self._cases:
             for route in self._model_routes:
                 runs.append(self._run_case(case, route=route))
-        recorded = tuple(runs)
-        return CompanySuiteMetrics(
-            runs=recorded,
-            decision_divergence_count=action_intent_decision_divergence_count(recorded),
-        )
+        return CompanySuiteMetrics(runs=tuple(runs))
 
     def _run_case(self, case: CompanyEvalCase, *, route: str) -> CompanyRunMetrics:
         if case.category is CompanyScenarioCategory.CRASH_CONCURRENCY_COST:
@@ -727,15 +731,57 @@ def canonical_action_intent_digest(action: ActionIntent) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+@dataclass(frozen=True, slots=True)
+class RouteInvarianceAssessment:
+    decision_divergence_count: int
+    incomplete_comparison_count: int
+    not_applicable_count: int
+
+
+def assess_route_invariance(
+    runs: Sequence[CompanyRunMetrics],
+) -> RouteInvarianceAssessment:
+    """Compare gateway decisions across routes within each case cohort."""
+
+    cohorts: dict[str, list[CompanyRunMetrics]] = {}
+    for run in runs:
+        cohorts.setdefault(run.case_id, []).append(run)
+    divergence = 0
+    incomplete = 0
+    not_applicable = 0
+    for cohort in cohorts.values():
+        present = [
+            run for run in cohort if run.action_intent_hash and run.observed_decision
+        ]
+        missing = [
+            run
+            for run in cohort
+            if not run.action_intent_hash or not run.observed_decision
+        ]
+        if not present:
+            not_applicable += 1
+            continue
+        if missing:
+            incomplete += 1
+            continue
+        hashes = {run.action_intent_hash for run in present}
+        if len(hashes) > 1:
+            incomplete += 1
+            continue
+        decisions = {run.observed_decision for run in present}
+        if len(decisions) > 1:
+            divergence += 1
+    return RouteInvarianceAssessment(
+        decision_divergence_count=divergence,
+        incomplete_comparison_count=incomplete,
+        not_applicable_count=not_applicable,
+    )
+
+
 def action_intent_decision_divergence_count(
     runs: Sequence[CompanyRunMetrics],
 ) -> int:
-    grouped: dict[str, set[str]] = {}
-    for run in runs:
-        if not run.action_intent_hash or not run.observed_decision:
-            continue
-        grouped.setdefault(run.action_intent_hash, set()).add(run.observed_decision)
-    return sum(1 for decisions in grouped.values() if len(decisions) > 1)
+    return assess_route_invariance(runs).decision_divergence_count
 
 
 def _action_intent_hash(gateway: CompanyRiskGateway) -> str | None:
@@ -761,6 +807,8 @@ __all__ = [
     "CompanyRunMetrics",
     "CompanySuiteMetrics",
     "OFFLINE_MODEL_ROUTES",
+    "RouteInvarianceAssessment",
     "action_intent_decision_divergence_count",
+    "assess_route_invariance",
     "canonical_action_intent_digest",
 ]

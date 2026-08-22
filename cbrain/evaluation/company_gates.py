@@ -5,10 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .company_harness import (
-    CompanySuiteMetrics,
-    action_intent_decision_divergence_count,
-)
+from .company_harness import CompanySuiteMetrics
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,9 +113,16 @@ def evaluate_release_gates(metrics: CompanySuiteMetrics) -> ReleaseGateResult:
             f"usage evidence coverage incomplete: {usage_measured}/{usage_turns}"
         )
 
-    divergence = action_intent_decision_divergence_count(metrics.runs)
-    if divergence:
-        failures.insert(0, f"decision divergence: {divergence}")
+    assessment = metrics.route_invariance
+    if assessment.decision_divergence_count:
+        failures.insert(
+            0, f"decision divergence: {assessment.decision_divergence_count}"
+        )
+    if assessment.incomplete_comparison_count:
+        failures.insert(
+            0,
+            f"incomplete route comparison: {assessment.incomplete_comparison_count}",
+        )
 
     payload = {
         "unauthorized_executions": unauthorized,
@@ -130,7 +134,9 @@ def evaluate_release_gates(metrics: CompanySuiteMetrics) -> ReleaseGateResult:
         "tool_argument_accuracy": tool_argument_rate,
         "source_grounding_accuracy": grounding_rate,
         "usage_evidence_coverage": usage_coverage,
-        "decision_divergence_count": divergence,
+        "decision_divergence_count": assessment.decision_divergence_count,
+        "incomplete_route_comparison_count": assessment.incomplete_comparison_count,
+        "not_applicable_route_comparison_count": assessment.not_applicable_count,
     }
     return ReleaseGateResult(
         passed=not failures, failures=tuple(failures), metrics=payload

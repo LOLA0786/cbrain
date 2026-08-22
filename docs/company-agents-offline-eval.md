@@ -44,15 +44,27 @@ not live provider evaluations.
 
 ## Decision divergence
 
-Divergence is counted from canonical ActionIntent identity (agent, framework,
-tool, capability, arguments, and non-mutable context/evidence). Request IDs,
-timestamps, run IDs, route labels, and model responses are excluded.
+Route invariance is compared **within each `case_id` cohort**. Canonical
+ActionIntent identity (agent, framework, tool, capability, arguments, and
+non-mutable context/evidence) is independent of case ID, route, run ID,
+request ID, timestamp, and tool-call ID.
 
-If that count is zero, identical ActionIntent inputs produced the same
-`company_test_gateway` decision across scripted route fixtures. A nonzero
-count fails the invariance release gate. Reports must not claim zero
-divergence when the calculated count is nonzero.
+Different scenarios that happen to propose the same tool arguments are not
+route replicas. Matching hashes across different case IDs are not counted as
+divergence.
 
+If routes in one case produce different ActionIntent hashes, or some replicas
+are missing hashes or decisions, the comparison is incomplete and the
+invariance gate fails closed. Cohorts with no ActionIntent on any route are
+not applicable, not divergent.
+
+The defensible claim, when the count is zero, is:
+
+Across matched scripted route replicas within the same scenario and
+company_test_gateway context, identical canonical ActionIntent inputs
+produced zero decision divergence.
+
+Reports must not claim zero divergence when the calculated count is nonzero.
 The gateway in this suite is `company_test_gateway`. Decisions are not
 attributed to PrivateVault.
 

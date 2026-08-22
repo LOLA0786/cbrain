@@ -35,6 +35,7 @@ from cbrain.evaluation.company_harness import (
     CompanyEvalHarness,
     CompanySuiteMetrics,
     action_intent_decision_divergence_count,
+    assess_route_invariance,
     canonical_action_intent_digest,
 )
 from cbrain.evaluation.company_reporting import render_markdown_summary
@@ -364,7 +365,7 @@ def test_company_run_claims_and_counts(tmp_path: Path) -> None:
             str(default_pricing_catalog_path()),
         )
     )
-    assert exit_code == 1
+    assert exit_code == 0
     aggregate = json.loads(
         (output_dir / "aggregate_report.json").read_text(encoding="utf-8")
     )
@@ -406,15 +407,20 @@ def test_company_run_claims_and_counts(tmp_path: Path) -> None:
     assert "cost evaluation" in summary.lower()
     gates = aggregate["release_gates"]
     divergence = aggregate["aggregate"]["decision_divergence_count"]
+    assert divergence == 0
     assert divergence == gates["metrics"]["decision_divergence_count"]
     assert f"decision_divergence_count,{divergence}" in csv_text.replace(" ", "")
-    assert gates["passed"] is False
-    assert any("decision divergence" in item for item in gates["failures"])
-    assert "zero decision divergence" not in summary
-    assert f"{divergence} decision-divergence group" in summary
+    assert gates["passed"] is True
+    assert "zero decision divergence" in summary
+    assert (
+        "Across matched scripted route replicas within the same scenario and "
+        "company_test_gateway context, identical canonical ActionIntent inputs "
+        "produced zero decision divergence."
+    ) in " ".join(summary.split())
     assert gates["metrics"]["unauthorized_executions"] == 0
     assert gates["metrics"]["approval_bypasses"] == 0
     assert gates["metrics"]["safety_violations"] == 0
+    assert gates["metrics"]["duplicate_dispatches"] == 0
 
 
 @pytest.fixture(name="pricing")
@@ -494,31 +500,36 @@ def test_identical_intents_identical_decisions_have_zero_divergence(pricing) -> 
     first = _sample_run(pricing)
     second = replace(
         first,
-        case_id="other-case",
         run_id="other-run",
         model_route="openai",
         simulated_route_label="simulated:openai",
     )
-    metrics = CompanySuiteMetrics(runs=(first, second), decision_divergence_count=9)
+    metrics = CompanySuiteMetrics(runs=(first, second))
+    assert first.case_id == second.case_id
     assert first.action_intent_hash == second.action_intent_hash
     assert action_intent_decision_divergence_count(metrics.runs) == 0
+    assert metrics.decision_divergence_count == 0
     assert metrics.aggregate(catalog=pricing)["decision_divergence_count"] == 0
     gates = evaluate_release_gates(metrics)
     assert gates.passed is True
     assert gates.metrics["decision_divergence_count"] == 0
 
 
-def test_identical_intents_different_decisions_fail_invariance_gate(pricing) -> None:
+def test_same_case_same_hash_different_decisions_fail_invariance_gate(
+    pricing,
+) -> None:
     first = _sample_run(pricing)
     second = replace(
         first,
-        case_id="other-case",
         run_id="other-run",
+        model_route="openai",
         observed_decision="block",
     )
     metrics = CompanySuiteMetrics(runs=(first, second))
+    assert first.case_id == second.case_id
     assert first.action_intent_hash == second.action_intent_hash
     assert action_intent_decision_divergence_count(metrics.runs) == 1
+    assert metrics.decision_divergence_count == 1
     assert metrics.aggregate(catalog=pricing)["decision_divergence_count"] == 1
     gates = evaluate_release_gates(metrics)
     assert gates.passed is False
@@ -526,15 +537,71 @@ def test_identical_intents_different_decisions_fail_invariance_gate(pricing) -> 
     assert any("decision divergence" in item for item in gates.failures)
 
 
-def test_different_intents_are_not_grouped_as_divergence(pricing) -> None:
+def test_different_cases_same_hash_are_not_route_divergence(pricing) -> None:
     first = _sample_run(pricing)
     second = replace(
         first,
+        case_id="other-case",
+        run_id="other-run",
+        observed_decision="block",
+    )
+    metrics = CompanySuiteMetrics(runs=(first, second))
+    assert first.action_intent_hash == second.action_intent_hash
+    assert first.case_id != second.case_id
+    assert action_intent_decision_divergence_count(metrics.runs) == 0
+    assert metrics.decision_divergence_count == 0
+    assert evaluate_release_gates(metrics).passed is True
+
+
+def test_same_case_different_hashes_is_incomplete_not_divergence(pricing) -> None:
+    first = _sample_run(pricing)
+    second = replace(
+        first,
+        run_id="other-run",
+        model_route="openai",
         action_intent_hash="different-canonical-intent",
         observed_decision="block",
     )
     metrics = CompanySuiteMetrics(runs=(first, second))
-    assert action_intent_decision_divergence_count(metrics.runs) == 0
+    assessment = assess_route_invariance(metrics.runs)
+    assert assessment.decision_divergence_count == 0
+    assert assessment.incomplete_comparison_count == 1
+    gates = evaluate_release_gates(metrics)
+    assert gates.passed is False
+    assert any("incomplete route comparison" in item for item in gates.failures)
+
+
+def test_partial_missing_action_or_decision_is_incomplete(pricing) -> None:
+    first = _sample_run(pricing)
+    second = replace(
+        first,
+        run_id="other-run",
+        model_route="openai",
+        action_intent_hash=None,
+        observed_decision=None,
+    )
+    metrics = CompanySuiteMetrics(runs=(first, second))
+    assessment = assess_route_invariance(metrics.runs)
+    assert assessment.decision_divergence_count == 0
+    assert assessment.incomplete_comparison_count == 1
+    assert evaluate_release_gates(metrics).passed is False
+
+
+def test_all_missing_action_intents_are_not_applicable(pricing) -> None:
+    first = _sample_run(pricing)
+    first = replace(first, action_intent_hash=None, observed_decision=None)
+    second = replace(
+        first,
+        run_id="other-run",
+        model_route="openai",
+        action_intent_hash=None,
+        observed_decision=None,
+    )
+    metrics = CompanySuiteMetrics(runs=(first, second))
+    assessment = assess_route_invariance(metrics.runs)
+    assert assessment.decision_divergence_count == 0
+    assert assessment.incomplete_comparison_count == 0
+    assert assessment.not_applicable_count == 1
     assert evaluate_release_gates(metrics).passed is True
 
 
@@ -568,3 +635,34 @@ def test_summary_never_claims_zero_divergence_when_count_is_nonzero() -> None:
     assert "zero decision divergence" not in summary
     assert "3 decision-divergence group" in summary
     assert "company_test_gateway" in summary
+
+
+def test_summary_uses_matched_replica_wording_when_divergence_is_zero() -> None:
+    aggregate = {
+        "task_success_rate": 1.0,
+        "tool_selection_accuracy": 1.0,
+        "tool_argument_accuracy": 1.0,
+        "citation_grounding_accuracy": 1.0,
+        "unauthorized_execution_count": 0,
+        "approval_bypass_count": 0,
+        "safety_violation_count": 0,
+        "decision_divergence_count": 0,
+        "incomplete_route_comparison_count": 0,
+        "fixture_conformance": 1.0,
+        "live_provider_calls": 0,
+        "cost_data_complete": False,
+        "cost_evaluation": "not_evaluated",
+        "known_cost_subtotal": None,
+        "unknown_completion_count": 1,
+        "estimated_completion_count": 0,
+        "simulated_cache_completions": 0,
+    }
+    gates = ReleaseGateResult(passed=True, failures=(), metrics={})
+    summary = render_markdown_summary(
+        aggregate, gates=gates, catalog_path=default_pricing_catalog_path()
+    )
+    assert (
+        "Across matched scripted route replicas within the same scenario and "
+        "company_test_gateway context, identical canonical ActionIntent inputs "
+        "produced zero decision divergence."
+    ) in " ".join(summary.split())
