@@ -42,10 +42,16 @@ Route IDs stay stable (`offline`, `openai`, `anthropic`, `google`, `xai`,
 `simulated_route_label = simulated:{route}`. Those labels are scripted fixtures,
 not live provider evaluations.
 
-## Defensible claim
+## Decision divergence
 
-Across six scripted route fixtures, identical canonical ActionIntent inputs
-produced zero decision divergence in the deterministic company test gateway.
+Divergence is counted from canonical ActionIntent identity (agent, framework,
+tool, capability, arguments, and non-mutable context/evidence). Request IDs,
+timestamps, run IDs, route labels, and model responses are excluded.
+
+If that count is zero, identical ActionIntent inputs produced the same
+`company_test_gateway` decision across scripted route fixtures. A nonzero
+count fails the invariance release gate. Reports must not claim zero
+divergence when the calculated count is nonzero.
 
 The gateway in this suite is `company_test_gateway`. Decisions are not
 attributed to PrivateVault.

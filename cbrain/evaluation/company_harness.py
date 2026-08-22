@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import json
 import statistics
 import threading
 import time
@@ -12,7 +13,7 @@ from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Any
 
-from cbrain import ExecutionStatus, GovernedRuntime
+from cbrain import ActionIntent, ExecutionStatus, GovernedRuntime
 from cbrain.agent import FoundationAgent, RunInput, RunStatus
 from cbrain.agent.durable import DurableRunState
 from cbrain.agent.store_memory import InMemoryRunStore
@@ -170,7 +171,9 @@ class CompanySuiteMetrics:
             "duplicate_dispatch_count": sum(
                 run.duplicate_dispatch_count for run in self.runs
             ),
-            "decision_divergence_count": self.decision_divergence_count,
+            "decision_divergence_count": action_intent_decision_divergence_count(
+                self.runs
+            ),
             "model_turns": sum(run.model_turns for run in self.runs),
             "tool_calls": sum(run.tool_calls for run in self.runs),
             "usage": usage_payload,
@@ -231,20 +234,13 @@ class CompanyEvalHarness:
 
     def run(self) -> CompanySuiteMetrics:
         runs: list[CompanyRunMetrics] = []
-        intent_decisions: dict[str, set[str]] = {}
         for case in self._cases:
             for route in self._model_routes:
-                metrics = self._run_case(case, route=route)
-                runs.append(metrics)
-                if metrics.action_intent_hash and metrics.observed_decision:
-                    intent_decisions.setdefault(metrics.action_intent_hash, set()).add(
-                        metrics.observed_decision
-                    )
-        divergence = sum(
-            1 for decisions in intent_decisions.values() if len(decisions) > 1
-        )
+                runs.append(self._run_case(case, route=route))
+        recorded = tuple(runs)
         return CompanySuiteMetrics(
-            runs=tuple(runs), decision_divergence_count=divergence
+            runs=recorded,
+            decision_divergence_count=action_intent_decision_divergence_count(recorded),
         )
 
     def _run_case(self, case: CompanyEvalCase, *, route: str) -> CompanyRunMetrics:
@@ -699,18 +695,53 @@ def _decision_from_gateway_calls(
     return None
 
 
+_MUTABLE_ACTION_CONTEXT_KEYS = frozenset(
+    {"run_id", "tool_call_id", "request_id", "idempotency_key", "timestamp"}
+)
+
+
+def canonical_action_intent_digest(action: ActionIntent) -> str:
+    """Hash ActionIntent identity, excluding request, time, and run metadata."""
+
+    context = {
+        key: value
+        for key, value in action.context.items()
+        if key not in _MUTABLE_ACTION_CONTEXT_KEYS
+    }
+    payload = {
+        "agent_id": action.agent_id,
+        "framework": action.framework,
+        "tool_name": action.tool_name,
+        "capability": action.capability,
+        "arguments": json.loads(action._arguments_json.decode("utf-8")),
+        "context": context,
+        "evidence": json.loads(action._evidence_json.decode("utf-8")),
+    }
+    encoded = json.dumps(
+        payload,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def action_intent_decision_divergence_count(
+    runs: Sequence[CompanyRunMetrics],
+) -> int:
+    grouped: dict[str, set[str]] = {}
+    for run in runs:
+        if not run.action_intent_hash or not run.observed_decision:
+            continue
+        grouped.setdefault(run.action_intent_hash, set()).add(run.observed_decision)
+    return sum(1 for decisions in grouped.values() if len(decisions) > 1)
+
+
 def _action_intent_hash(gateway: CompanyRiskGateway) -> str | None:
     if not gateway.actions:
         return None
-    action = gateway.actions[0]
-    canonical = (
-        action.tool_name.encode("utf-8")
-        + b"|"
-        + action.capability.encode("utf-8")
-        + b"|"
-        + action._arguments_json
-    )
-    return hashlib.sha256(canonical).hexdigest()
+    return canonical_action_intent_digest(gateway.actions[0])
 
 
 def _accuracy(values: Sequence[bool]) -> float | None:
@@ -730,4 +761,6 @@ __all__ = [
     "CompanyRunMetrics",
     "CompanySuiteMetrics",
     "OFFLINE_MODEL_ROUTES",
+    "action_intent_decision_divergence_count",
+    "canonical_action_intent_digest",
 ]
