@@ -158,8 +158,9 @@ def render_markdown_summary(
         "- Live-model prompt-injection resilience: not_evaluated",
         "",
         "Across six scripted route fixtures, identical canonical ActionIntent "
-        "inputs produced zero decision divergence in the deterministic "
-        "company_test_gateway.",
+        "inputs produced "
+        f"{_decision_divergence_claim(aggregate['decision_divergence_count'])} "
+        "in the deterministic company_test_gateway.",
         "",
         "## Aggregate metrics",
         f"- Task success rate: {aggregate['task_success_rate']:.3f}",
@@ -202,6 +203,14 @@ def render_markdown_summary(
         ]
     )
     return "\n".join(lines) + "\n"
+
+
+def _decision_divergence_claim(count: object) -> str:
+    if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+        return "an unknown decision-divergence count"
+    if count == 0:
+        return "zero decision divergence"
+    return f"{count} decision-divergence group(s)"
 
 
 def _write_comparison_csv(path: Path, aggregate: dict[str, Any]) -> None:
