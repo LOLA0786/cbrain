@@ -1,0 +1,85 @@
+"""Tool risk classification for company agents."""
+
+from __future__ import annotations
+
+from enum import StrEnum
+
+from .kinds import CompanyAgentKind
+
+
+class ToolRiskLevel(StrEnum):
+    ALLOW = "allow"
+    REVIEW = "review"
+    BLOCK = "block"
+
+
+_GTM_RISKS: dict[str, ToolRiskLevel] = {
+    "search_crm": ToolRiskLevel.ALLOW,
+    "research_account": ToolRiskLevel.ALLOW,
+    "qualify_lead": ToolRiskLevel.ALLOW,
+    "detect_duplicate_leads": ToolRiskLevel.ALLOW,
+    "draft_outreach": ToolRiskLevel.ALLOW,
+    "update_crm_record": ToolRiskLevel.ALLOW,
+    "prepare_email": ToolRiskLevel.REVIEW,
+    "send_email": ToolRiskLevel.REVIEW,
+    "bulk_campaign": ToolRiskLevel.BLOCK,
+    "delete_lead": ToolRiskLevel.BLOCK,
+}
+
+_OPERATIONS_RISKS: dict[str, ToolRiskLevel] = {
+    "check_service_health": ToolRiskLevel.ALLOW,
+    "search_runbooks": ToolRiskLevel.ALLOW,
+    "triage_ticket": ToolRiskLevel.ALLOW,
+    "assign_severity": ToolRiskLevel.ALLOW,
+    "create_incident_draft": ToolRiskLevel.ALLOW,
+    "prepare_escalation": ToolRiskLevel.ALLOW,
+    "propose_restart": ToolRiskLevel.REVIEW,
+    "propose_infra_change": ToolRiskLevel.REVIEW,
+    "delete_data": ToolRiskLevel.BLOCK,
+}
+
+_LEGAL_RISKS: dict[str, ToolRiskLevel] = {
+    "search_contracts": ToolRiskLevel.ALLOW,
+    "extract_clause": ToolRiskLevel.ALLOW,
+    "compare_contracts": ToolRiskLevel.ALLOW,
+    "identify_deviations": ToolRiskLevel.ALLOW,
+    "prepare_redline": ToolRiskLevel.ALLOW,
+    "draft_legal_summary": ToolRiskLevel.ALLOW,
+    "sign_contract": ToolRiskLevel.BLOCK,
+    "file_document": ToolRiskLevel.BLOCK,
+    "send_commitment": ToolRiskLevel.REVIEW,
+    "provide_legal_advice": ToolRiskLevel.BLOCK,
+}
+
+_ACCOUNTS_RISKS: dict[str, ToolRiskLevel] = {
+    "read_invoices": ToolRiskLevel.ALLOW,
+    "extract_invoice_data": ToolRiskLevel.ALLOW,
+    "reconcile_records": ToolRiskLevel.ALLOW,
+    "detect_duplicate_invoices": ToolRiskLevel.ALLOW,
+    "prepare_aging_report": ToolRiskLevel.ALLOW,
+    "inspect_ledger": ToolRiskLevel.ALLOW,
+    "prepare_payment": ToolRiskLevel.REVIEW,
+    "prepare_refund": ToolRiskLevel.REVIEW,
+    "execute_payment": ToolRiskLevel.REVIEW,
+    "change_bank_details": ToolRiskLevel.BLOCK,
+    "change_vendor": ToolRiskLevel.BLOCK,
+}
+
+
+def risk_for_tool(kind: CompanyAgentKind, tool_name: str) -> ToolRiskLevel:
+    table = _RISK_TABLE[kind]
+    try:
+        return table[tool_name]
+    except KeyError as exc:
+        raise ValueError(f"unknown tool {tool_name!r} for {kind.value}") from exc
+
+
+_RISK_TABLE: dict[CompanyAgentKind, dict[str, ToolRiskLevel]] = {
+    CompanyAgentKind.GTM: _GTM_RISKS,
+    CompanyAgentKind.OPERATIONS: _OPERATIONS_RISKS,
+    CompanyAgentKind.LEGAL: _LEGAL_RISKS,
+    CompanyAgentKind.ACCOUNTS: _ACCOUNTS_RISKS,
+}
+
+
+__all__ = ["ToolRiskLevel", "risk_for_tool"]

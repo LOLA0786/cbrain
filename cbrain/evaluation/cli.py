@@ -8,12 +8,17 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from cbrain.company.kinds import CompanyAgentKind
 from cbrain.models import FiveProviderSettings, build_five_provider_router
 
 from .agent_harness import AgentEvalHarness, compare_configurations
 from .agent_reporting import write_agent_eval_artifacts
 from .agent_suites import default_agent_eval_cases, offline_agent_eval_cases
 from .catalog import Scenario, default_catalog
+from .company_gates import evaluate_release_gates
+from .company_harness import CompanyEvalHarness
+from .company_reporting import write_company_eval_artifacts
+from .company_suites import cases_for_agent, plan_payload
 from .model_matrix import (
     FiveModelMatrixRunner,
     ProposalOutcome,
@@ -64,6 +69,34 @@ def main(arguments: Sequence[str] | None = None) -> int:
         default=str(default_pricing_catalog_path()),
         help="Path to replaceable pricing catalog JSON",
     )
+    company_plan = subcommands.add_parser(
+        "company-plan",
+        help="Print offline company-agent scenario counts and categories",
+    )
+    company_plan.add_argument(
+        "--agent",
+        default="all",
+        choices=("all", "gtm", "operations", "legal", "accounts"),
+    )
+    company_run = subcommands.add_parser(
+        "company-run",
+        help="Run offline company-agent evaluation suites",
+    )
+    company_run.add_argument(
+        "--agent",
+        default="all",
+        choices=("all", "gtm", "operations", "legal", "accounts"),
+    )
+    company_run.add_argument(
+        "--output-dir",
+        default="company-eval-output",
+        help="Directory for JSONL, JSON, CSV, Markdown, and manifest artifacts",
+    )
+    company_run.add_argument(
+        "--pricing-catalog",
+        default=str(default_pricing_catalog_path()),
+        help="Path to replaceable pricing catalog JSON",
+    )
     parsed = parser.parse_args(arguments)
     catalog = default_catalog()
     exit_code = 0
@@ -97,6 +130,27 @@ def main(arguments: Sequence[str] | None = None) -> int:
         )
         payload = comparison
         if not comparison["optimization_accepted"]:
+            exit_code = 1
+    elif parsed.command == "company-plan":
+        payload = plan_payload(_parse_company_agent(parsed.agent))
+    elif parsed.command == "company-run":
+        pricing_path = Path(parsed.pricing_catalog)
+        pricing = load_pricing_catalog(pricing_path)
+        kind = _parse_company_agent(parsed.agent)
+        cases = cases_for_agent(kind)
+        metrics = CompanyEvalHarness(catalog=pricing, cases=cases).run()
+        aggregate = metrics.aggregate(catalog=pricing)
+        gates = evaluate_release_gates(metrics)
+        write_company_eval_artifacts(
+            output_dir=parsed.output_dir,
+            metrics=metrics,
+            aggregate=aggregate,
+            gates=gates,
+            catalog=pricing,
+            catalog_path=pricing_path,
+        )
+        payload = {"aggregate": aggregate, "release_gates": gates.to_payload()}
+        if not gates.passed:
             exit_code = 1
     else:
         if not parsed.confirm_live_api:
@@ -178,8 +232,11 @@ def _agent_plan_payload() -> dict[str, Any]:
     }
 
 
+def _parse_company_agent(value: str) -> CompanyAgentKind | None:
+    if value == "all":
+        return None
+    return CompanyAgentKind(value)
+
+
 if __name__ == "__main__":
     raise SystemExit(main())
-
-
-__all__ = ["main"]
