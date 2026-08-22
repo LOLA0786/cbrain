@@ -12,15 +12,16 @@ from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Any
 
-from cbrain import GovernedRuntime
+from cbrain import ExecutionStatus, GovernedRuntime
 from cbrain.agent import FoundationAgent, RunInput, RunStatus
 from cbrain.agent.durable import DurableRunState
 from cbrain.agent.store_memory import InMemoryRunStore
+from cbrain.company.authority import CompanyExecutionContext
 from cbrain.company.governance import CompanyRiskGateway
 from cbrain.company.handlers import build_handlers
 from cbrain.company.kinds import CompanyAgentKind
 from cbrain.company.profiles import spec_for_kind
-from cbrain.company.simulators import load_fixture_bundle
+from cbrain.company.simulators import CompanySimulatorBundle, load_fixture_bundle
 from cbrain.models import FIVE_PROVIDER_ROUTES, ModelRouter, TextOutput, ToolCall
 from cbrain.models.instrumented import InstrumentedModelAdapter
 from cbrain.models.usage import TokenUsage, aggregate_usage
@@ -40,6 +41,7 @@ from .company_scenarios import (
 from .cost import (
     CostBreakdown,
     aggregate_costs,
+    blended_cost_per_million_tokens,
     cost_is_complete,
     cost_per_successful_task,
 )
@@ -72,6 +74,11 @@ class CompanyRunMetrics:
     cost: CostBreakdown
     latencies_ms: tuple[float, ...]
     action_intent_hash: str | None
+    execution_mode: str = "offline_fixture"
+    model_output_source: str = "scripted"
+    provider_called: bool = False
+    decision_authority: str = "company_test_gateway"
+    simulated_route_label: str = "simulated:offline"
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -97,6 +104,11 @@ class CompanyRunMetrics:
             "cost": self.cost.to_payload(),
             "latencies_ms": list(self.latencies_ms),
             "action_intent_hash": self.action_intent_hash,
+            "execution_mode": self.execution_mode,
+            "model_output_source": self.model_output_source,
+            "provider_called": self.provider_called,
+            "decision_authority": self.decision_authority,
+            "simulated_route_label": self.simulated_route_label,
         }
 
 
@@ -142,6 +154,7 @@ class CompanySuiteMetrics:
             if run.citation_grounding_correct is not None
         ]
         cost_complete = cost_is_complete(total_cost.status)
+        usage_payload = aggregate_usage(usage_records).to_payload()
         return {
             "task_success_rate": self.task_success_rate,
             "tool_selection_accuracy": _accuracy(tool_selection),
@@ -160,16 +173,39 @@ class CompanySuiteMetrics:
             "decision_divergence_count": self.decision_divergence_count,
             "model_turns": sum(run.model_turns for run in self.runs),
             "tool_calls": sum(run.tool_calls for run in self.runs),
-            "usage": aggregate_usage(usage_records).to_payload(),
+            "usage": usage_payload,
             "total_cost": total_cost.to_payload(),
             "cost_data_complete": cost_complete,
-            "known_cost_subtotal": total_cost.known_cost_subtotal,
+            "known_cost_subtotal": _decimal_text(total_cost.known_cost_subtotal)
+            if total_cost.known_cost_subtotal is not None
+            else None,
+            "estimated_completion_count": usage_payload["estimated_completions"],
+            "unknown_completion_count": usage_payload["unknown_completions"],
+            "simulated_cache_completions": usage_payload["simulated_cache_completions"],
+            "cost_evaluation": "evaluated" if cost_complete else "not_evaluated",
+            "cost_optimization_accepted": False,
+            "fixture_conformance": self.task_success_rate,
+            "real_model_quality": "not_evaluated",
+            "live_provider_calls": 0,
+            "model_prompt_injection_resilience": "not_evaluated",
+            "control_path_adversarial": "evaluated",
+            "decision_authority": "company_test_gateway",
             "average_latency_ms": statistics.mean(latencies) if latencies else None,
             "p95_latency_ms": p95,
             "cost_per_successful_task": _decimal_text(
                 cost_per_successful_task(
                     total_cost=total_cost.total_cost,
                     successful_tasks=successful,
+                    cost_status=total_cost.status,
+                )
+            ),
+            "cost_per_run": None
+            if not cost_complete or not self.runs or total_cost.total_cost is None
+            else _decimal_text(total_cost.total_cost / Decimal(len(self.runs))),
+            "blended_cost_per_million": _decimal_text(
+                blended_cost_per_million_tokens(
+                    aggregate_usage(usage_records),
+                    total_cost=total_cost.total_cost,
                     cost_status=total_cost.status,
                 )
             ),
@@ -225,8 +261,9 @@ class CompanyEvalHarness:
         run_id = f"company-{case.case_id}-{route}"
         bundle = load_fixture_bundle(case.fixture_id)
         spec = spec_for_kind(case.agent_kind)
-        gateway = CompanyRiskGateway(spec)
-        handlers = build_handlers(kind=case.agent_kind, bundle=bundle)
+        context = _execution_context(case, bundle)
+        gateway = CompanyRiskGateway(spec, context=context, bundle=bundle)
+        handlers = build_handlers(kind=case.agent_kind, bundle=bundle, context=context)
         before = _snapshot_for_case(case, bundle)
         adapter = InstrumentedModelAdapter(
             route_id=route,
@@ -280,8 +317,9 @@ class CompanyEvalHarness:
         bundle = load_fixture_bundle(case.fixture_id)
         spec = spec_for_kind(case.agent_kind)
         store = CrashAfterPreparedStore()
-        gateway = CompanyRiskGateway(spec)
-        handlers = build_handlers(kind=case.agent_kind, bundle=bundle)
+        context = _execution_context(case, bundle)
+        gateway = CompanyRiskGateway(spec, context=context, bundle=bundle)
+        handlers = build_handlers(kind=case.agent_kind, bundle=bundle, context=context)
         before = _snapshot_for_case(case, bundle)
         outputs = list(case.model_outputs)
         adapter = InstrumentedModelAdapter(
@@ -312,7 +350,9 @@ class CompanyEvalHarness:
         )
         recovered = FoundationAgent(
             profile=replace(spec.profile, model_route=route),
-            runtime=GovernedRuntime(CompanyRiskGateway(spec)),
+            runtime=GovernedRuntime(
+                CompanyRiskGateway(spec, context=context, bundle=bundle)
+            ),
             model_router=ModelRouter({route: recovery_adapter}),
             tools=spec.tools,
             handlers=handlers,
@@ -362,8 +402,10 @@ class CompanyEvalHarness:
         entered = threading.Event()
         release = threading.Event()
         gateway_a = BlockingGateway(entered=entered, release=release)
+        context = _execution_context(case, bundle)
         handlers = _counting_handlers(
-            build_handlers(kind=case.agent_kind, bundle=bundle), handler_calls
+            build_handlers(kind=case.agent_kind, bundle=bundle, context=context),
+            handler_calls,
         )
         outputs = list(case.model_outputs)
         worker_result: list[Any] = []
@@ -394,7 +436,9 @@ class CompanyEvalHarness:
         entered.wait(timeout=5.0)
         observer = FoundationAgent(
             profile=replace(spec.profile, model_route=route),
-            runtime=GovernedRuntime(CompanyRiskGateway(spec)),
+            runtime=GovernedRuntime(
+                CompanyRiskGateway(spec, context=context, bundle=bundle)
+            ),
             model_router=ModelRouter({route: SequenceModel([])}),
             tools=spec.tools,
             handlers=handlers,
@@ -453,6 +497,7 @@ class CompanyEvalHarness:
             )
             or (0.0,),
             action_intent_hash=None,
+            simulated_route_label=f"simulated:{route}",
         )
 
     def _build_metrics(
@@ -533,7 +578,25 @@ class CompanyEvalHarness:
             cost=cost,
             latencies_ms=latencies_ms,
             action_intent_hash=intent_hash,
+            simulated_route_label=f"simulated:{route}",
         )
+
+
+def _execution_context(
+    case: CompanyEvalCase, bundle: CompanySimulatorBundle
+) -> CompanyExecutionContext:
+    if case.authorized_matters is not None:
+        permitted = case.authorized_matters
+    elif case.agent_kind is CompanyAgentKind.LEGAL:
+        permitted = frozenset(bundle.legal.matters)
+    else:
+        permitted = frozenset()
+    return CompanyExecutionContext(
+        principal_id=f"{case.agent_kind.value}-eval-actor",
+        agent_kind=case.agent_kind,
+        permitted_matter_ids=permitted,
+        authorization_scope_id=f"scope-{case.case_id}",
+    )
 
 
 def _counting_handlers(
@@ -606,6 +669,12 @@ def _observed_decision(
 ) -> str | None:
     if not gateway.actions or tool_name is None:
         return None
+    if gateway.last_status is ExecutionStatus.EXECUTED:
+        return ExpectedDecision.ALLOW.value
+    if gateway.last_status is ExecutionStatus.REVIEW_REQUIRED:
+        return ExpectedDecision.REVIEW.value
+    if gateway.last_status is ExecutionStatus.BLOCKED:
+        return ExpectedDecision.BLOCK.value
     if gateway.handler_calls:
         return ExpectedDecision.ALLOW.value
     action = gateway.actions[0]

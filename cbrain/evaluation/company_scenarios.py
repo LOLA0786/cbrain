@@ -61,6 +61,7 @@ class CompanyEvalCase:
     concurrent_resume: bool = False
     model_route: str = "offline"
     expect_citation_grounding: bool = False
+    authorized_matters: frozenset[str] | None = None
 
     def __post_init__(self) -> None:
         if not self.case_id.strip():
