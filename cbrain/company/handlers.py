@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from decimal import Decimal
 from typing import Any
 
+from .authority import CompanyExecutionContext
 from .kinds import CompanyAgentKind
 from .simulators import (
     AccountsSimulator,
@@ -22,13 +23,14 @@ def build_handlers(
     *,
     kind: CompanyAgentKind,
     bundle: CompanySimulatorBundle,
+    context: CompanyExecutionContext | None = None,
 ) -> dict[str, Callable[[Mapping[str, Any]], Any]]:
     if kind is CompanyAgentKind.GTM:
         return _gtm_handlers(bundle.gtm)
     if kind is CompanyAgentKind.OPERATIONS:
         return _operations_handlers(bundle.operations)
     if kind is CompanyAgentKind.LEGAL:
-        return _legal_handlers(bundle.legal)
+        return _legal_handlers(bundle.legal, context=context)
     return _accounts_handlers(bundle.accounts)
 
 
@@ -214,18 +216,41 @@ def _operations_handlers(
 
 def _legal_handlers(
     sim: LegalSimulator,
+    *,
+    context: CompanyExecutionContext | None,
 ) -> dict[str, Callable[[Mapping[str, Any]], Any]]:
-    def _authorize(matter_id: str, contract_id: str) -> None:
-        allowed = sim.matters.get(matter_id, set())
-        if contract_id not in allowed:
-            raise SimulatorValidationError("confidentiality boundary violation")
+    def _permitted() -> frozenset[str]:
+        if context is None:
+            raise SimulatorValidationError("legal matter scope required")
+        return context.permitted_matter_ids
+
+    def _authorized_contracts() -> set[str]:
+        ids: set[str] = set()
+        for matter_id in _permitted():
+            ids.update(sim.matters.get(matter_id, set()))
+        return ids
+
+    def _require_contract(contract_id: str) -> dict[str, Any]:
+        if contract_id not in _authorized_contracts():
+            raise SimulatorValidationError("contract outside authorized matter scope")
+        contract = sim.contracts.get(contract_id)
+        if contract is None:
+            raise SimulatorValidationError("contract outside authorized matter scope")
         with sim._lock:
-            sim.access_log.append({"matter_id": matter_id, "contract_id": contract_id})
+            sim.access_log.append(
+                {
+                    "matter_id": str(contract["matter_id"]),
+                    "contract_id": contract_id,
+                }
+            )
+        return contract
 
     def search_contracts(arguments: Mapping[str, Any]) -> dict[str, Any]:
         matter_id = str(arguments["matter_id"])
+        if matter_id not in _permitted():
+            raise SimulatorValidationError("matter outside authorized scope")
         query = str(arguments["query"]).lower()
-        allowed = sim.matters.get(matter_id, set())
+        allowed = sim.matters.get(matter_id, set()) & _authorized_contracts()
         matches = [
             sim.contracts[cid]
             for cid in allowed
@@ -236,10 +261,7 @@ def _legal_handlers(
     def extract_clause(arguments: Mapping[str, Any]) -> dict[str, Any]:
         contract_id = str(arguments["contract_id"])
         clause_id = str(arguments["clause_id"])
-        contract = sim.contracts.get(contract_id)
-        if contract is None:
-            raise SimulatorValidationError("unknown contract")
-        _authorize(str(contract["matter_id"]), contract_id)
+        contract = _require_contract(contract_id)
         clauses = contract.get("clauses", {})
         if clause_id not in clauses:
             raise SimulatorValidationError("unknown clause")
@@ -252,10 +274,8 @@ def _legal_handlers(
         }
 
     def compare_contracts(arguments: Mapping[str, Any]) -> dict[str, Any]:
-        left = sim.contracts.get(str(arguments["left_id"]))
-        right = sim.contracts.get(str(arguments["right_id"]))
-        if left is None or right is None:
-            raise SimulatorValidationError("unknown contract")
+        left = _require_contract(str(arguments["left_id"]))
+        right = _require_contract(str(arguments["right_id"]))
         return {
             "left_id": left["contract_id"],
             "right_id": right["contract_id"],
@@ -265,9 +285,7 @@ def _legal_handlers(
 
     def identify_deviations(arguments: Mapping[str, Any]) -> dict[str, Any]:
         contract_id = str(arguments["contract_id"])
-        contract = sim.contracts.get(contract_id)
-        if contract is None:
-            raise SimulatorValidationError("unknown contract")
+        _require_contract(contract_id)
         return {
             "contract_id": contract_id,
             "playbook_id": str(arguments["playbook_id"]),
@@ -276,15 +294,12 @@ def _legal_handlers(
 
     def prepare_redline(arguments: Mapping[str, Any]) -> dict[str, Any]:
         contract_id = str(arguments["contract_id"])
-        if contract_id not in sim.contracts:
-            raise SimulatorValidationError("unknown contract")
+        _require_contract(contract_id)
         return {"contract_id": contract_id, "changes": list(arguments["changes"])}
 
     def draft_legal_summary(arguments: Mapping[str, Any]) -> dict[str, Any]:
         contract_id = str(arguments["contract_id"])
-        contract = sim.contracts.get(contract_id)
-        if contract is None:
-            raise SimulatorValidationError("unknown contract")
+        _require_contract(contract_id)
         citation = f"{contract_id}:c1"
         return {
             "contract_id": contract_id,
@@ -293,21 +308,34 @@ def _legal_handlers(
         }
 
     def sign_contract(arguments: Mapping[str, Any]) -> dict[str, Any]:
-        return {"contract_id": str(arguments["contract_id"]), "signed": True}
+        contract_id = str(arguments["contract_id"])
+        _require_contract(contract_id)
+        return {"contract_id": contract_id, "signed": True}
 
     def file_document(arguments: Mapping[str, Any]) -> dict[str, Any]:
+        document_id = str(arguments["document_id"])
+        if context is None:
+            raise SimulatorValidationError("legal matter scope required")
+        if document_id not in _authorized_contracts():
+            raise SimulatorValidationError("document outside authorized matter scope")
         return {
-            "document_id": str(arguments["document_id"]),
+            "document_id": document_id,
             "court": str(arguments["court"]),
             "filed": True,
         }
 
     def send_commitment(arguments: Mapping[str, Any]) -> dict[str, Any]:
-        return {"matter_id": str(arguments["matter_id"]), "sent": True}
+        matter_id = str(arguments["matter_id"])
+        if matter_id not in _permitted():
+            raise SimulatorValidationError("matter outside authorized scope")
+        return {"matter_id": matter_id, "sent": True}
 
     def provide_legal_advice(arguments: Mapping[str, Any]) -> dict[str, Any]:
+        matter_id = str(arguments["matter_id"])
+        if matter_id not in _permitted():
+            raise SimulatorValidationError("matter outside authorized scope")
         return {
-            "matter_id": str(arguments["matter_id"]),
+            "matter_id": matter_id,
             "advice": str(arguments["conclusion"]),
         }
 

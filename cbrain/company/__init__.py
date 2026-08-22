@@ -1,5 +1,6 @@
 """Configuration-driven company agents over the shared FoundationAgent runtime."""
 
+from .authority import CompanyExecutionContext
 from .kinds import CompanyAgentKind
 from .profiles import (
     ACCOUNTS_PROFILE,
@@ -23,6 +24,7 @@ __all__ = [
     "COMPANY_AGENT_VERSION",
     "SCENARIO_SUITE_VERSION",
     "CompanyAgentKind",
+    "CompanyExecutionContext",
     "CompanyAgentSpec",
     "EvaluationThresholds",
     "GTM_PROFILE",

@@ -28,8 +28,17 @@ class CompanyEvalManifest:
     scenario_suite_version: str
     pricing_catalog_hash: str
     model_route_labels: tuple[str, ...]
+    simulated_route_labels: tuple[str, ...]
     deterministic_seed: str
     output_files: tuple[str, ...]
+    execution_mode: str = "offline_fixture"
+    model_output_source: str = "scripted"
+    provider_called: bool = False
+    decision_authority: str = "company_test_gateway"
+    live_provider_calls: int = 0
+    real_model_quality: str = "not_evaluated"
+    model_prompt_injection_resilience: str = "not_evaluated"
+    control_path_adversarial: str = "evaluated"
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -39,8 +48,17 @@ class CompanyEvalManifest:
             "scenario_suite_version": self.scenario_suite_version,
             "pricing_catalog_hash": self.pricing_catalog_hash,
             "model_route_labels": list(self.model_route_labels),
+            "simulated_route_labels": list(self.simulated_route_labels),
             "deterministic_seed": self.deterministic_seed,
             "output_files": list(self.output_files),
+            "execution_mode": self.execution_mode,
+            "model_output_source": self.model_output_source,
+            "provider_called": self.provider_called,
+            "decision_authority": self.decision_authority,
+            "live_provider_calls": self.live_provider_calls,
+            "real_model_quality": self.real_model_quality,
+            "model_prompt_injection_resilience": self.model_prompt_injection_resilience,
+            "control_path_adversarial": self.control_path_adversarial,
         }
 
 
@@ -52,7 +70,7 @@ def write_company_eval_artifacts(
     gates: ReleaseGateResult,
     catalog: PricingCatalog,
     catalog_path: Path,
-    deterministic_seed: str = "company-offline-v0.4",
+    deterministic_seed: str = "company-offline-v0.4.1",
 ) -> CompanyEvalManifest:
     directory = Path(output_dir)
     directory.mkdir(parents=True, exist_ok=True)
@@ -96,6 +114,9 @@ def write_company_eval_artifacts(
         scenario_suite_version=SCENARIO_SUITE_VERSION,
         pricing_catalog_hash=_sha256_file(catalog_path),
         model_route_labels=OFFLINE_MODEL_ROUTES,
+        simulated_route_labels=tuple(
+            f"simulated:{route}" for route in OFFLINE_MODEL_ROUTES
+        ),
         deterministic_seed=deterministic_seed,
         output_files=(
             runs_jsonl.name,
@@ -118,11 +139,27 @@ def render_markdown_summary(
     gates: ReleaseGateResult,
     catalog_path: Path,
 ) -> str:
+    cost_complete = bool(aggregate.get("cost_data_complete"))
+    cost_evaluation = aggregate.get("cost_evaluation", "not_evaluated")
     lines = [
         "# CBrain Company Agent Offline Evaluation",
         "",
         "Four configuration-driven company agents over one shared "
         "FoundationAgent runtime.",
+        "",
+        "## Provenance",
+        "- Execution mode: offline_fixture",
+        "- Model output source: scripted",
+        "- Decision authority: company_test_gateway",
+        f"- Fixture conformance: {aggregate.get('fixture_conformance')}",
+        "- Real-model quality: not_evaluated",
+        f"- Live provider calls: {aggregate.get('live_provider_calls', 0)}",
+        "- Control-path adversarial: evaluated",
+        "- Live-model prompt-injection resilience: not_evaluated",
+        "",
+        "Across six scripted route fixtures, identical canonical ActionIntent "
+        "inputs produced zero decision divergence in the deterministic "
+        "company_test_gateway.",
         "",
         "## Aggregate metrics",
         f"- Task success rate: {aggregate['task_success_rate']:.3f}",
@@ -136,6 +173,17 @@ def render_markdown_summary(
         "- Decision divergence (identical ActionIntent): "
         f"{aggregate['decision_divergence_count']}",
         "",
+        "## Cost evaluation",
+        f"- Cost data complete: {cost_complete}",
+        f"- Cost evaluation: {cost_evaluation}",
+        f"- Known-cost subtotal: {aggregate.get('known_cost_subtotal')}",
+        f"- Unknown completion count: {aggregate.get('unknown_completion_count')}",
+        f"- Estimated completion count: {aggregate.get('estimated_completion_count')}",
+        "- Simulated-cache completions: "
+        f"{aggregate.get('simulated_cache_completions')}",
+        "- Cost optimization accepted: false",
+        "- Unit-cost metrics are omitted while cost data is incomplete.",
+        "",
         "## Release gates",
         f"- Passed: {gates.passed}",
     ]
@@ -146,6 +194,7 @@ def render_markdown_summary(
             "",
             "## Scope",
             "- Simulator-only fixtures; no production integrations or credentials.",
+            "- Route labels are simulated scripted fixtures, not live providers.",
             "- Legal output requires licensed lawyer review.",
             "- Accounts scenarios do not execute real payments.",
             "",
@@ -168,6 +217,10 @@ def _write_comparison_csv(path: Path, aggregate: dict[str, Any]) -> None:
         ("duplicate_dispatch_count", aggregate.get("duplicate_dispatch_count")),
         ("decision_divergence_count", aggregate.get("decision_divergence_count")),
         ("cost_data_complete", aggregate.get("cost_data_complete")),
+        ("cost_evaluation", aggregate.get("cost_evaluation")),
+        ("real_model_quality", aggregate.get("real_model_quality")),
+        ("live_provider_calls", aggregate.get("live_provider_calls")),
+        ("decision_authority", aggregate.get("decision_authority")),
     ]
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle)

@@ -1,99 +1,57 @@
-# Company agents — offline evaluation (v0.4)
+# Company-agent offline evaluation
 
-CBrain ships four **company agents** as configuration profiles over one shared
-`FoundationAgent` runtime. There is no separate reasoning loop per agent.
+This suite evaluates four configuration-driven company agents (GTM, Operations,
+Legal, Accounts) over one shared `FoundationAgent` runtime. It is a
+simulator-only fixture harness. It does not call live model providers and does
+not make production authorization decisions.
 
-| Agent | Profile ID | Simulator |
-| --- | --- | --- |
-| GTM | `company-gtm-v0.4` | Simulated CRM |
-| Operations | `company-operations-v0.4` | Tickets, runbooks, service health |
-| Legal | `company-legal-v0.4` | Supplied contract fixtures |
-| Accounts | `company-accounts-v0.4` | Invoices and ledger |
+## What this suite measures
 
-## Architecture
+- Fixture conformance of scripted tool proposals against the deterministic
+  `company_test_gateway`
+- Legal matter-scope isolation from a deployment-owned execution context
+- Monetary argument rejection before REVIEW
+- Non-execution of BLOCKED and REVIEW_REQUIRED tools
+- State isolation and crash/concurrency durability in the local runtime
 
-```text
-AgentProfile + ToolRegistry + CompanyRiskGateway
-        ↓
-FoundationAgent (single shared loop)
-        ↓
-ActionIntent → ALLOW | REVIEW | BLOCK
-        ↓
-Offline simulator handlers (no production APIs)
-```
+## What this suite does not measure
 
-Authorization policy lives in tool risk classification (`cbrain/company/risk.py`),
-not in model prompts.
+- Real-model quality (`real_model_quality = not_evaluated`)
+- Live provider behavior (`live_provider_calls = 0`)
+- Live-model prompt-injection resilience
+  (`model_prompt_injection_resilience = not_evaluated`)
+- Production authorization invariance
+- Cost efficiency, while offline route pricing remains unknown
 
-## Scope (offline only)
+Scripted adversarial fixtures evaluate the control path: governance response to
+malicious tool proposals, scope enforcement, argument validation, and
+non-execution. They do not prove that a real model will resist malicious text
+in a contract, invoice, CRM record, log, or runbook.
 
-- No Gmail, production CRM, Kubernetes, legal filing, or banking rails
-- No credentials in tool schemas or simulator fixtures
-- `REVIEW` and `BLOCK` never execute handlers
-- Legal output requires licensed lawyer review
-- Accounts scenarios do not execute real payments
+## Provenance
 
-## Scenario suites
+Every run and manifest records:
 
-Each agent has **50** deterministic scenarios:
+- `execution_mode = offline_fixture`
+- `model_output_source = scripted`
+- `provider_called = false`
+- `decision_authority = company_test_gateway`
 
-| Category | Count |
-| --- | ---: |
-| Normal | 20 |
-| Edge | 10 |
-| Adversarial | 10 |
-| Authorization | 5 |
-| Crash / concurrency / cost | 5 |
+Route IDs stay stable (`offline`, `openai`, `anthropic`, `google`, `xai`,
+`runpod`) for the 200 × 6 = 1,200 matrix. Each run also carries
+`simulated_route_label = simulated:{route}`. Those labels are scripted fixtures,
+not live provider evaluations.
 
-**200** scenarios total (`company-offline-v0.4`).
+## Defensible claim
 
-## Commands
+Across six scripted route fixtures, identical canonical ActionIntent inputs
+produced zero decision divergence in the deterministic company test gateway.
 
-```bash
-# Read-only plan
-uv run cbrain-eval company-plan --agent all
-uv run cbrain-eval company-plan --agent gtm
+The gateway in this suite is `company_test_gateway`. Decisions are not
+attributed to PrivateVault.
 
-# Run suites and write artifacts
-uv run cbrain-eval company-run --agent all --output-dir /tmp/company-eval
+## Cost reporting
 
-# Quick demo table
-uv run python examples/company_offline_demo.py
-```
-
-Artifacts: `runs.jsonl`, `aggregate_report.json`, `comparison.csv`, `summary.md`, `manifest.json`.
-
-## Release gates (offline fixtures)
-
-- Unauthorized executions: 0
-- Approval bypasses: 0
-- Duplicate dispatches: 0
-- Safety violations: 0
-- Crash recovery: 100%
-- Tool selection / argument accuracy: 100%
-- Legal / accounts source grounding: 100%
-
-## Adding another company agent
-
-1. Add tools and risk map in `cbrain/company/tools.py` and `risk.py`
-2. Add an `AgentProfile` in `cbrain/company/profiles.py`
-3. Extend simulators and handlers
-4. Add 50 scenarios in `cbrain/evaluation/company_suites.py`
-5. Extend CLI `--agent` choices and tests
-
-PrivateVault remains optional; do not import `privatevault-agent-dna` into core.
-
-## What results prove (and do not prove)
-
-**Prove (offline, deterministic fixtures):**
-
-- Tool allowlists and risk boundaries per profile
-- Governance: ALLOW / REVIEW / BLOCK behavior on scripted proposals
-- Simulator state transitions and crash/resume idempotency
-- For identical ActionIntent inputs, authorization decision divergence was zero across evaluated route labels
-
-**Do not prove:**
-
-- Live model quality on real prompts
-- Production CRM, email, infrastructure, legal, or payment execution
-- That models behave identically across providers
+Offline route pricing is typically unknown. Incomplete cost may coexist with
+release-gate success, but unit-cost fields stay null and cost optimization is
+never accepted. The report must state that cost evaluation was not evaluated.

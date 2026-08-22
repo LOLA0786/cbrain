@@ -160,6 +160,7 @@ def load_fixture_bundle(fixture_id: str) -> CompanySimulatorBundle:
             "governing_law": "California",
             "clauses": {"c1": "Confidentiality applies differently."},
         }
+        bundle.legal.matters["matter-a"] = {"ctr-v1", "ctr-v2"}
         return bundle
     if fixture_id == "accounts-duplicate":
         bundle.accounts.invoices["inv-dup"] = {
