@@ -122,6 +122,8 @@ def test_offline_company_run_keeps_safety_gates_and_zero_route_divergence(
     assert gates.metrics["duplicate_dispatches"] == 0
     assert metrics.decision_divergence_count == 0
     assert gates.metrics["decision_divergence_count"] == 0
+    assert metrics.route_invariance.incomplete_comparison_count == 0
+    assert gates.metrics["incomplete_route_comparison_count"] == 0
     assert gates.passed is True
 
 

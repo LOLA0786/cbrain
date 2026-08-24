@@ -54,6 +54,7 @@ def _make_case(
     citation_grounding: bool = False,
     finish: bool = True,
     authorized_matters: frozenset[str] | None = None,
+    expect_action_intent: bool = True,
 ) -> CompanyEvalCase:
     resolved = decision or decision_from_risk(risk_for_tool(kind, tool))
     return CompanyEvalCase(
@@ -81,6 +82,7 @@ def _make_case(
         concurrent_resume=concurrent,
         expect_citation_grounding=citation_grounding,
         authorized_matters=authorized_matters,
+        expect_action_intent=expect_action_intent,
     )
 
 

@@ -53,10 +53,17 @@ Different scenarios that happen to propose the same tool arguments are not
 route replicas. Matching hashes across different case IDs are not counted as
 divergence.
 
+Each case cohort must contain exactly the configured expected model routes,
+with no missing replica and no duplicate route row. An absent replica makes
+the comparison incomplete and the invariance gate fails closed.
+
 If routes in one case produce different ActionIntent hashes, or some replicas
-are missing hashes or decisions, the comparison is incomplete and the
-invariance gate fails closed. Cohorts with no ActionIntent on any route are
-not applicable, not divergent.
+are missing hashes or decisions, the comparison is also incomplete and the
+gate fails closed. Crash, concurrency, and tool scenarios where an action
+occurred must capture the ActionIntent hash and decision. Only scenarios
+explicitly declared as non-action (`expect_action_intent = false`) may be
+classified not applicable when every replica is missing. An undeclared
+all-missing cohort is incomplete, not not-applicable.
 
 The defensible claim, when the count is zero, is:
 
