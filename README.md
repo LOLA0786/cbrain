@@ -14,6 +14,10 @@ It normalizes tool calls from agent frameworks, sends consequential actions to P
 
 ## Architecture
 
+The durable map of layers, authority, and workflows is
+[`docs/architecture.md`](docs/architecture.md). The diagram below is the
+production control path only.
+
 ```mermaid
 flowchart TD
     A["Hermes or framework agent"] --> H["Framework adapter"]
