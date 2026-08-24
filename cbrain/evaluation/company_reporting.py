@@ -157,10 +157,10 @@ def render_markdown_summary(
         "- Control-path adversarial: evaluated",
         "- Live-model prompt-injection resilience: not_evaluated",
         "",
-        "Across six scripted route fixtures, identical canonical ActionIntent "
-        "inputs produced "
-        f"{_decision_divergence_claim(aggregate['decision_divergence_count'])} "
-        "in the deterministic company_test_gateway.",
+        _route_invariance_claim(
+            divergence_count=aggregate.get("decision_divergence_count"),
+            incomplete_count=aggregate.get("incomplete_route_comparison_count"),
+        ),
         "",
         "## Aggregate metrics",
         f"- Task success rate: {aggregate['task_success_rate']:.3f}",
@@ -205,12 +205,36 @@ def render_markdown_summary(
     return "\n".join(lines) + "\n"
 
 
-def _decision_divergence_claim(count: object) -> str:
-    if isinstance(count, bool) or not isinstance(count, int) or count < 0:
-        return "an unknown decision-divergence count"
-    if count == 0:
-        return "zero decision divergence"
-    return f"{count} decision-divergence group(s)"
+def _route_invariance_claim(
+    *, divergence_count: object, incomplete_count: object
+) -> str:
+    if isinstance(incomplete_count, bool) or not isinstance(incomplete_count, int):
+        incomplete = 0
+    else:
+        incomplete = incomplete_count
+    if isinstance(divergence_count, bool) or not isinstance(divergence_count, int):
+        return (
+            "Across matched scripted route replicas within the same scenario "
+            "and company_test_gateway context, identical canonical ActionIntent "
+            "inputs produced an unknown decision-divergence count."
+        )
+    if incomplete and incomplete > 0:
+        return (
+            "Across matched scripted route replicas within the same scenario "
+            "and company_test_gateway context, route invariance comparison was "
+            f"incomplete for {incomplete} case cohort(s)."
+        )
+    if divergence_count == 0:
+        return (
+            "Across matched scripted route replicas within the same scenario "
+            "and company_test_gateway context, identical canonical ActionIntent "
+            "inputs produced zero decision divergence."
+        )
+    return (
+        "Across matched scripted route replicas within the same scenario "
+        "and company_test_gateway context, identical canonical ActionIntent "
+        f"inputs produced {divergence_count} decision-divergence group(s)."
+    )
 
 
 def _write_comparison_csv(path: Path, aggregate: dict[str, Any]) -> None:
@@ -225,6 +249,10 @@ def _write_comparison_csv(path: Path, aggregate: dict[str, Any]) -> None:
         ("safety_violation_count", aggregate.get("safety_violation_count")),
         ("duplicate_dispatch_count", aggregate.get("duplicate_dispatch_count")),
         ("decision_divergence_count", aggregate.get("decision_divergence_count")),
+        (
+            "incomplete_route_comparison_count",
+            aggregate.get("incomplete_route_comparison_count"),
+        ),
         ("cost_data_complete", aggregate.get("cost_data_complete")),
         ("cost_evaluation", aggregate.get("cost_evaluation")),
         ("real_model_quality", aggregate.get("real_model_quality")),

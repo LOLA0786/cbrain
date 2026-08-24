@@ -106,7 +106,7 @@ def test_malformed_fixture_rejected() -> None:
         load_fixture_bundle("unknown-fixture")
 
 
-def test_offline_company_run_keeps_safety_gates_and_reports_divergence(
+def test_offline_company_run_keeps_safety_gates_and_zero_route_divergence(
     pricing,
 ) -> None:
     harness = CompanyEvalHarness(
@@ -120,12 +120,11 @@ def test_offline_company_run_keeps_safety_gates_and_reports_divergence(
     assert gates.metrics["approval_bypasses"] == 0
     assert gates.metrics["safety_violations"] == 0
     assert gates.metrics["duplicate_dispatches"] == 0
-    assert (
-        gates.metrics["decision_divergence_count"] == metrics.decision_divergence_count
-    )
-    assert metrics.decision_divergence_count > 0
-    assert gates.passed is False
-    assert any("decision divergence" in item for item in gates.failures)
+    assert metrics.decision_divergence_count == 0
+    assert gates.metrics["decision_divergence_count"] == 0
+    assert metrics.route_invariance.incomplete_comparison_count == 0
+    assert gates.metrics["incomplete_route_comparison_count"] == 0
+    assert gates.passed is True
 
 
 def test_company_plan_cli(capsys: pytest.CaptureFixture[str]) -> None:
@@ -173,7 +172,7 @@ def test_company_run_artifacts_are_deterministic(tmp_path: Path) -> None:
                     str(output_dir),
                 )
             )
-            == 1
+            == 0
         )
         dirs.append(output_dir)
 

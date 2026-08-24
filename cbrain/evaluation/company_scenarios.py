@@ -62,6 +62,7 @@ class CompanyEvalCase:
     model_route: str = "offline"
     expect_citation_grounding: bool = False
     authorized_matters: frozenset[str] | None = None
+    expect_action_intent: bool = True
 
     def __post_init__(self) -> None:
         if not self.case_id.strip():

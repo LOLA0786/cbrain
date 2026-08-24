@@ -8,6 +8,7 @@ import json
 import statistics
 import threading
 import time
+from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from decimal import Decimal
@@ -23,6 +24,8 @@ from cbrain.company.handlers import build_handlers
 from cbrain.company.kinds import CompanyAgentKind
 from cbrain.company.profiles import spec_for_kind
 from cbrain.company.simulators import CompanySimulatorBundle, load_fixture_bundle
+from cbrain.company.spec import CompanyAgentSpec
+from cbrain.company.validation import validate_company_action
 from cbrain.models import FIVE_PROVIDER_ROUTES, ModelRouter, TextOutput, ToolCall
 from cbrain.models.instrumented import InstrumentedModelAdapter
 from cbrain.models.usage import TokenUsage, aggregate_usage
@@ -38,6 +41,7 @@ from .company_scenarios import (
     CompanyEvalCase,
     CompanyScenarioCategory,
     ExpectedDecision,
+    decision_from_risk,
 )
 from .cost import (
     CostBreakdown,
@@ -80,6 +84,7 @@ class CompanyRunMetrics:
     provider_called: bool = False
     decision_authority: str = "company_test_gateway"
     simulated_route_label: str = "simulated:offline"
+    expect_action_intent: bool = True
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -110,19 +115,30 @@ class CompanyRunMetrics:
             "provider_called": self.provider_called,
             "decision_authority": self.decision_authority,
             "simulated_route_label": self.simulated_route_label,
+            "expect_action_intent": self.expect_action_intent,
         }
 
 
 @dataclass(frozen=True, slots=True)
 class CompanySuiteMetrics:
     runs: tuple[CompanyRunMetrics, ...]
-    decision_divergence_count: int = 0
+    expected_model_routes: tuple[str, ...] = OFFLINE_MODEL_ROUTES
 
     @property
     def task_success_rate(self) -> float:
         if not self.runs:
             return 0.0
         return sum(1 for run in self.runs if run.success) / len(self.runs)
+
+    @property
+    def route_invariance(self) -> RouteInvarianceAssessment:
+        return assess_route_invariance(
+            self.runs, expected_routes=self.expected_model_routes
+        )
+
+    @property
+    def decision_divergence_count(self) -> int:
+        return self.route_invariance.decision_divergence_count
 
     def aggregate(self, *, catalog: PricingCatalog) -> dict[str, Any]:
         usage_records = tuple(
@@ -156,6 +172,7 @@ class CompanySuiteMetrics:
         ]
         cost_complete = cost_is_complete(total_cost.status)
         usage_payload = aggregate_usage(usage_records).to_payload()
+        invariance = self.route_invariance
         return {
             "task_success_rate": self.task_success_rate,
             "tool_selection_accuracy": _accuracy(tool_selection),
@@ -171,9 +188,9 @@ class CompanySuiteMetrics:
             "duplicate_dispatch_count": sum(
                 run.duplicate_dispatch_count for run in self.runs
             ),
-            "decision_divergence_count": action_intent_decision_divergence_count(
-                self.runs
-            ),
+            "decision_divergence_count": invariance.decision_divergence_count,
+            "incomplete_route_comparison_count": invariance.incomplete_comparison_count,
+            "not_applicable_route_comparison_count": invariance.not_applicable_count,
             "model_turns": sum(run.model_turns for run in self.runs),
             "tool_calls": sum(run.tool_calls for run in self.runs),
             "usage": usage_payload,
@@ -237,10 +254,8 @@ class CompanyEvalHarness:
         for case in self._cases:
             for route in self._model_routes:
                 runs.append(self._run_case(case, route=route))
-        recorded = tuple(runs)
         return CompanySuiteMetrics(
-            runs=recorded,
-            decision_divergence_count=action_intent_decision_divergence_count(recorded),
+            runs=tuple(runs), expected_model_routes=self._model_routes
         )
 
     def _run_case(self, case: CompanyEvalCase, *, route: str) -> CompanyRunMetrics:
@@ -346,9 +361,7 @@ class CompanyEvalHarness:
         )
         recovered = FoundationAgent(
             profile=replace(spec.profile, model_route=route),
-            runtime=GovernedRuntime(
-                CompanyRiskGateway(spec, context=context, bundle=bundle)
-            ),
+            runtime=GovernedRuntime(gateway),
             model_router=ModelRouter({route: recovery_adapter}),
             tools=spec.tools,
             handlers=handlers,
@@ -483,7 +496,12 @@ class CompanyEvalHarness:
             model_turns=final.model_turns,
             tool_calls=final.tool_calls,
             observed_status=final.status,
-            observed_decision=_decision_from_gateway_calls([], case),
+            observed_decision=_policy_decision(
+                spec=spec,
+                action=gateway_a.actions[0] if gateway_a.actions else None,
+                context=context,
+                bundle=bundle,
+            ),
             usage_records=usage_records,
             cost=cost,
             latencies_ms=tuple(
@@ -492,8 +510,9 @@ class CompanyEvalHarness:
                 for item in adapter.observations
             )
             or (0.0,),
-            action_intent_hash=None,
+            action_intent_hash=_action_intent_hash(gateway_a),
             simulated_route_label=f"simulated:{route}",
+            expect_action_intent=case.expect_action_intent,
         )
 
     def _build_metrics(
@@ -575,6 +594,7 @@ class CompanyEvalHarness:
             latencies_ms=latencies_ms,
             action_intent_hash=intent_hash,
             simulated_route_label=f"simulated:{route}",
+            expect_action_intent=case.expect_action_intent,
         )
 
 
@@ -687,12 +707,24 @@ def _kind_for_tool(tool_name: str) -> CompanyAgentKind:
     raise ValueError(f"unknown tool {tool_name!r}")
 
 
-def _decision_from_gateway_calls(
-    handler_calls: list[str], case: CompanyEvalCase
+def _policy_decision(
+    *,
+    spec: CompanyAgentSpec,
+    action: ActionIntent | None,
+    context: CompanyExecutionContext,
+    bundle: CompanySimulatorBundle,
 ) -> str | None:
-    if case.expected_decision:
-        return case.expected_decision.value
-    return None
+    if action is None:
+        return None
+    validation = validate_company_action(
+        kind=spec.kind,
+        action=action,
+        context=context,
+        bundle=bundle,
+    )
+    if not validation.ok:
+        return ExpectedDecision.BLOCK.value
+    return decision_from_risk(spec.decision_for_tool(action.tool_name)).value
 
 
 _MUTABLE_ACTION_CONTEXT_KEYS = frozenset(
@@ -727,18 +759,77 @@ def canonical_action_intent_digest(action: ActionIntent) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+@dataclass(frozen=True, slots=True)
+class RouteInvarianceAssessment:
+    decision_divergence_count: int
+    incomplete_comparison_count: int
+    not_applicable_count: int
+
+
+def assess_route_invariance(
+    runs: Sequence[CompanyRunMetrics],
+    *,
+    expected_routes: Sequence[str] = OFFLINE_MODEL_ROUTES,
+) -> RouteInvarianceAssessment:
+    """Compare gateway decisions across expected routes within each case cohort."""
+
+    expected = tuple(expected_routes)
+    expected_counts = Counter(expected)
+    cohorts: dict[str, list[CompanyRunMetrics]] = {}
+    for run in runs:
+        cohorts.setdefault(run.case_id, []).append(run)
+    divergence = 0
+    incomplete = 0
+    not_applicable = 0
+    for cohort in cohorts.values():
+        route_counts = Counter(run.model_route for run in cohort)
+        if route_counts != expected_counts:
+            incomplete += 1
+            continue
+        present = [
+            run for run in cohort if run.action_intent_hash and run.observed_decision
+        ]
+        missing = [
+            run
+            for run in cohort
+            if not run.action_intent_hash or not run.observed_decision
+        ]
+        if not present:
+            if missing and not any(run.expect_action_intent for run in cohort):
+                not_applicable += 1
+            else:
+                incomplete += 1
+            continue
+        if missing:
+            incomplete += 1
+            continue
+        hashes = {run.action_intent_hash for run in present}
+        if len(hashes) > 1:
+            incomplete += 1
+            continue
+        decisions = {run.observed_decision for run in present}
+        if len(decisions) > 1:
+            divergence += 1
+    return RouteInvarianceAssessment(
+        decision_divergence_count=divergence,
+        incomplete_comparison_count=incomplete,
+        not_applicable_count=not_applicable,
+    )
+
+
 def action_intent_decision_divergence_count(
     runs: Sequence[CompanyRunMetrics],
+    *,
+    expected_routes: Sequence[str] = OFFLINE_MODEL_ROUTES,
 ) -> int:
-    grouped: dict[str, set[str]] = {}
-    for run in runs:
-        if not run.action_intent_hash or not run.observed_decision:
-            continue
-        grouped.setdefault(run.action_intent_hash, set()).add(run.observed_decision)
-    return sum(1 for decisions in grouped.values() if len(decisions) > 1)
+    return assess_route_invariance(
+        runs, expected_routes=expected_routes
+    ).decision_divergence_count
 
 
-def _action_intent_hash(gateway: CompanyRiskGateway) -> str | None:
+def _action_intent_hash(
+    gateway: CompanyRiskGateway | BlockingGateway,
+) -> str | None:
     if not gateway.actions:
         return None
     return canonical_action_intent_digest(gateway.actions[0])
@@ -761,6 +852,8 @@ __all__ = [
     "CompanyRunMetrics",
     "CompanySuiteMetrics",
     "OFFLINE_MODEL_ROUTES",
+    "RouteInvarianceAssessment",
     "action_intent_decision_divergence_count",
+    "assess_route_invariance",
     "canonical_action_intent_digest",
 ]
