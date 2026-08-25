@@ -10,6 +10,7 @@ from .authority import CompanyExecutionContext
 from .kinds import CompanyAgentKind
 from .simulators import (
     AccountsSimulator,
+    CodingSimulator,
     CompanySimulatorBundle,
     GTMSimulator,
     LegalSimulator,
@@ -31,6 +32,8 @@ def build_handlers(
         return _operations_handlers(bundle.operations)
     if kind is CompanyAgentKind.LEGAL:
         return _legal_handlers(bundle.legal, context=context)
+    if kind is CompanyAgentKind.CODING:
+        return _coding_handlers(bundle.coding)
     return _accounts_handlers(bundle.accounts)
 
 
@@ -477,6 +480,78 @@ def _accounts_handlers(
         "execute_payment": execute_payment,
         "change_bank_details": change_bank_details,
         "change_vendor": change_vendor,
+    }
+
+
+def _coding_handlers(
+    sim: CodingSimulator,
+) -> dict[str, Callable[[Mapping[str, Any]], Any]]:
+    def search_repo(arguments: Mapping[str, Any]) -> dict[str, Any]:
+        query = str(arguments["query"]).lower()
+        matches = [
+            path
+            for path, blob in sim.search_index.items()
+            if query in path.lower() or query in blob.lower()
+        ]
+        return {"query": str(arguments["query"]), "matches": matches}
+
+    def read_file(arguments: Mapping[str, Any]) -> dict[str, Any]:
+        path = str(arguments["path"])
+        if path not in sim.files:
+            raise SimulatorValidationError("unknown file")
+        return {"path": path, "content": sim.files[path]}
+
+    def run_tests(arguments: Mapping[str, Any]) -> dict[str, Any]:
+        payload = {"suite": str(arguments["suite"]), "passed": True, "failed": 0}
+        with sim._lock:
+            sim.test_runs.append(payload)
+        return payload
+
+    def propose_patch(arguments: Mapping[str, Any]) -> dict[str, Any]:
+        payload = {
+            "path": str(arguments["path"]),
+            "diff": str(arguments["diff"]),
+            "proposed": True,
+        }
+        with sim._lock:
+            sim.patches.append(payload)
+        return payload
+
+    def apply_patch(arguments: Mapping[str, Any]) -> dict[str, Any]:
+        path = str(arguments["path"])
+        diff = str(arguments["diff"])
+        with sim._lock:
+            current = sim.files.get(path, "")
+            sim.files[path] = current + "\n" + diff if current else diff
+            sim.patches.append({"path": path, "diff": diff, "applied": True})
+        return {"path": path, "applied": True}
+
+    def open_pull_request(arguments: Mapping[str, Any]) -> dict[str, Any]:
+        payload = {
+            "title": str(arguments["title"]),
+            "body": str(arguments["body"]),
+            "head": str(arguments["head"]),
+            "opened": True,
+        }
+        with sim._lock:
+            sim.pull_requests.append(payload)
+        return payload
+
+    def force_push(arguments: Mapping[str, Any]) -> dict[str, Any]:
+        return {"ref": str(arguments["ref"]), "forced": True}
+
+    def write_secret(arguments: Mapping[str, Any]) -> dict[str, Any]:
+        return {"path": str(arguments["path"]), "written": True}
+
+    return {
+        "search_repo": search_repo,
+        "read_file": read_file,
+        "run_tests": run_tests,
+        "propose_patch": propose_patch,
+        "apply_patch": apply_patch,
+        "open_pull_request": open_pull_request,
+        "force_push": force_push,
+        "write_secret": write_secret,
     }
 
 

@@ -297,13 +297,16 @@ tools are denied. Pins live in `upstreams.lock.json`.
 ### 5.4 Company agents (configuration, not new runtimes)
 
 Four kinds share one `FoundationAgent`: **GTM, Operations, Legal, Accounts**.
+A fifth kind, **Coding**, is configured the same way but is exercised through
+the operator loop (approval resume), not the 200-case × 6-route fixture matrix.
 
 | Kind | Typical allow / review / block |
 | --- | --- |
 | GTM | CRM search/research allow; outbound mail review |
 | Operations | Health/runbooks allow; restart/propose review |
-| Legal | In-scope extract/search allow; sign/commit block; matter isolation |
+| Legal | In-scope extract/search allow; sign/commit block or review; matter isolation |
 | Accounts | Reads allow; prepare/execute payment review; invalid money **block** |
+| Coding | Search/read/test allow; patch/PR review; force-push and secrets **block** |
 
 Legal scope comes from `CompanyExecutionContext` (deployment-owned
 `permitted_matter_ids`), not from the model widening `matter_id`.
@@ -315,6 +318,13 @@ onto the same `ExecutionStatus` values. Reports must say
 `decision_authority = company_test_gateway` and must not claim PrivateVault
 invariance or live-model quality.
 
+**Operator loop** (`cbrain/company/approval.py`, `evaluation/operator_loop.py`):
+Accounts, Legal, and Coding REVIEW tools are parked as the same `ActionIntent`.
+A named human `approve(request_id)` may then run the handler **once**. A second
+complete is BLOCKED. A frozen inbox (INDETERMINATE or explicit freeze) never
+approves and never dispatches. Evidence packs record digest, statuses, and
+approver identity — not tool arguments.
+
 ### 5.5 Evaluation — four layers, four claims
 
 Do not collapse these into one “the suite passed” sentence.
@@ -325,6 +335,7 @@ Do not collapse these into one “the suite passed” sentence.
 | Five-provider matrix | `evaluation/model_matrix.py` | Exact canonical proposals vs text vs unmatched | Live zero-divergence unless a recorded live run says so |
 | Agent cost/quality | `evaluation/agent_harness.py` | Offline fixture conformance, usage, **honest incomplete cost** | Production cost optimization while data is incomplete |
 | Company agents | `evaluation/company_*.py` | 200 scripted cases × 6 route IDs = 1200 fixture runs; safety gates; **within-case** route invariance | Real-model quality, live providers, PrivateVault decisions |
+| Operator loop | `evaluation/operator_loop.py` | Named approval resume for accounts/legal/coding REVIEW tools; freeze-closed INDETERMINATE | Live models, PrivateVault, production sidecar |
 
 Company route invariance (the load-bearing rule):
 
@@ -335,7 +346,8 @@ Company route invariance (the load-bearing rule):
 - Provenance on every run: `execution_mode=offline_fixture`, `model_output_source=scripted`, `provider_called=false`, `simulated_route_label=simulated:{route}`.
 
 CLI: `cbrain-eval` (`catalog`, `scenario`, `model-plan`, `model-generate`,
-`agent-plan`, `agent-run`, `company-plan`, `company-run`).
+`agent-plan`, `agent-run`, `company-plan`, `company-run`, `operator-plan`,
+`operator-run`).
 
 Live provider calls require `--confirm-live-api`. Offline company runs never
 call providers.
@@ -372,6 +384,7 @@ New model provider     → models/                       (wire format only)
 New business target    → simulators/ + catalog route   (no policy)
 New production policy  → PrivateVault (upstream pin)   (not this repo)
 New company tool       → company/tools + risk + handler + scenarios
+New operator task      → evaluation/operator_tasks.py (accounts/legal/coding)
 New eval claim         → evaluation/ + tests that forbid overclaim
 Runtime invariant      → contracts.py / runtime.py / tests/test_runtime.py
 ```
