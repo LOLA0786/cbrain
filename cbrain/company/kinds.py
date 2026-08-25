@@ -10,6 +10,21 @@ class CompanyAgentKind(StrEnum):
     OPERATIONS = "operations"
     LEGAL = "legal"
     ACCOUNTS = "accounts"
+    CODING = "coding"
 
 
-__all__ = ["CompanyAgentKind"]
+MATRIX_AGENT_KINDS: tuple[CompanyAgentKind, ...] = (
+    CompanyAgentKind.GTM,
+    CompanyAgentKind.OPERATIONS,
+    CompanyAgentKind.LEGAL,
+    CompanyAgentKind.ACCOUNTS,
+)
+
+OPERATOR_AGENT_KINDS: tuple[CompanyAgentKind, ...] = (
+    CompanyAgentKind.ACCOUNTS,
+    CompanyAgentKind.LEGAL,
+    CompanyAgentKind.CODING,
+)
+
+
+__all__ = ["CompanyAgentKind", "MATRIX_AGENT_KINDS", "OPERATOR_AGENT_KINDS"]

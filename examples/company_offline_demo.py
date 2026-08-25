@@ -1,8 +1,8 @@
-"""Offline demo for four company-agent profiles."""
+"""Offline demo for company-agent profiles."""
 
 from __future__ import annotations
 
-from cbrain.company.kinds import CompanyAgentKind
+from cbrain.company.kinds import MATRIX_AGENT_KINDS
 from cbrain.company.profiles import all_company_profiles
 from cbrain.evaluation.company_gates import evaluate_release_gates
 from cbrain.evaluation.company_harness import CompanyEvalHarness
@@ -33,7 +33,7 @@ def main() -> int:
     print()
     print(f"task success rate: {metrics.task_success_rate:.3f}")
     print(f"release gates passed: {gates.passed}")
-    for kind in CompanyAgentKind:
+    for kind in MATRIX_AGENT_KINDS:
         agent_runs = [run for run in metrics.runs if run.agent_kind == kind.value]
         successes = sum(1 for run in agent_runs if run.success)
         print(f"  {kind.value}: {successes}/{len(agent_runs)}")

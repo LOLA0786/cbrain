@@ -11,7 +11,7 @@ import pytest
 from cbrain.agent import ToolRegistry, ToolRegistryError
 from cbrain.company.governance import CompanyRiskGateway
 from cbrain.company.handlers import build_handlers
-from cbrain.company.kinds import CompanyAgentKind
+from cbrain.company.kinds import MATRIX_AGENT_KINDS, CompanyAgentKind
 from cbrain.company.profiles import all_company_profiles, spec_for_kind
 from cbrain.company.risk import ToolRiskLevel
 from cbrain.company.simulators import SimulatorValidationError, load_fixture_bundle
@@ -36,11 +36,11 @@ def fixture_pricing():
     return load_pricing_catalog(default_pricing_catalog_path())
 
 
-def test_four_profiles_share_foundation_contract() -> None:
+def test_five_profiles_share_foundation_contract() -> None:
     specs = all_company_profiles()
-    assert len(specs) == 4
+    assert len(specs) == 5
     ids = {spec.agent_id for spec in specs}
-    assert len(ids) == 4
+    assert len(ids) == 5
 
 
 def test_tool_allowlists_are_isolated() -> None:
@@ -48,10 +48,14 @@ def test_tool_allowlists_are_isolated() -> None:
     ops = spec_for_kind(CompanyAgentKind.OPERATIONS).profile.permitted_tools
     legal = spec_for_kind(CompanyAgentKind.LEGAL).profile.permitted_tools
     accounts = spec_for_kind(CompanyAgentKind.ACCOUNTS).profile.permitted_tools
+    coding = spec_for_kind(CompanyAgentKind.CODING).profile.permitted_tools
     assert gtm.isdisjoint(ops)
     assert gtm.isdisjoint(legal)
     assert gtm.isdisjoint(accounts)
+    assert gtm.isdisjoint(coding)
     assert ops.isdisjoint(accounts)
+    assert legal.isdisjoint(coding)
+    assert accounts.isdisjoint(coding)
 
 
 def test_review_and_block_never_execute_handlers() -> None:
@@ -81,7 +85,7 @@ def test_scenario_suite_has_two_hundred_cases() -> None:
     cases = all_company_eval_cases()
     validate_suite(cases)
     assert len(cases) == 200
-    for kind in CompanyAgentKind:
+    for kind in MATRIX_AGENT_KINDS:
         agent_cases = cases_for_agent(kind)
         assert len(agent_cases) == SCENARIOS_PER_AGENT
 
@@ -94,7 +98,7 @@ def test_scenario_category_counts() -> None:
         CompanyScenarioCategory.AUTHORIZATION: 5,
         CompanyScenarioCategory.CRASH_CONCURRENCY_COST: 5,
     }
-    for kind in CompanyAgentKind:
+    for kind in MATRIX_AGENT_KINDS:
         agent_cases = cases_for_agent(kind)
         for category, count in expected.items():
             actual = sum(1 for case in agent_cases if case.category is category)

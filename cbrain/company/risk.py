@@ -51,6 +51,17 @@ _LEGAL_RISKS: dict[str, ToolRiskLevel] = {
     "provide_legal_advice": ToolRiskLevel.BLOCK,
 }
 
+_CODING_RISKS: dict[str, ToolRiskLevel] = {
+    "search_repo": ToolRiskLevel.ALLOW,
+    "read_file": ToolRiskLevel.ALLOW,
+    "run_tests": ToolRiskLevel.ALLOW,
+    "propose_patch": ToolRiskLevel.REVIEW,
+    "apply_patch": ToolRiskLevel.REVIEW,
+    "open_pull_request": ToolRiskLevel.REVIEW,
+    "force_push": ToolRiskLevel.BLOCK,
+    "write_secret": ToolRiskLevel.BLOCK,
+}
+
 _ACCOUNTS_RISKS: dict[str, ToolRiskLevel] = {
     "read_invoices": ToolRiskLevel.ALLOW,
     "extract_invoice_data": ToolRiskLevel.ALLOW,
@@ -79,6 +90,7 @@ _RISK_TABLE: dict[CompanyAgentKind, dict[str, ToolRiskLevel]] = {
     CompanyAgentKind.OPERATIONS: _OPERATIONS_RISKS,
     CompanyAgentKind.LEGAL: _LEGAL_RISKS,
     CompanyAgentKind.ACCOUNTS: _ACCOUNTS_RISKS,
+    CompanyAgentKind.CODING: _CODING_RISKS,
 }
 
 

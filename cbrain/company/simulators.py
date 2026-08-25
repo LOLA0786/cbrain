@@ -92,11 +92,32 @@ class AccountsSimulator:
 
 
 @dataclass
+class CodingSimulator:
+    files: dict[str, str] = field(default_factory=dict)
+    search_index: dict[str, str] = field(default_factory=dict)
+    patches: list[dict[str, Any]] = field(default_factory=list)
+    pull_requests: list[dict[str, Any]] = field(default_factory=list)
+    test_runs: list[dict[str, Any]] = field(default_factory=list)
+    _lock: RLock = field(default_factory=RLock, repr=False)
+
+    def snapshot(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "files": dict(self.files),
+                "search_index": dict(self.search_index),
+                "patches": deepcopy(self.patches),
+                "pull_requests": deepcopy(self.pull_requests),
+                "test_runs": deepcopy(self.test_runs),
+            }
+
+
+@dataclass
 class CompanySimulatorBundle:
     gtm: GTMSimulator = field(default_factory=GTMSimulator)
     operations: OperationsSimulator = field(default_factory=OperationsSimulator)
     legal: LegalSimulator = field(default_factory=LegalSimulator)
     accounts: AccountsSimulator = field(default_factory=AccountsSimulator)
+    coding: CodingSimulator = field(default_factory=CodingSimulator)
 
     def snapshot(self) -> dict[str, Any]:
         return {
@@ -104,6 +125,7 @@ class CompanySimulatorBundle:
             "operations": self.operations.snapshot(),
             "legal": self.legal.snapshot(),
             "accounts": self.accounts.snapshot(),
+            "coding": self.coding.snapshot(),
         }
 
 
@@ -263,23 +285,42 @@ def default_fixture_bundle() -> CompanySimulatorBundle:
             "bank_ref": "bank-v1",
         },
     }
+    bundle.coding.files = {
+        "src/app.py": "def add(left, right):\n    return left + right\n",
+        "tests/test_app.py": (
+            "from src.app import add\n\ndef test_add():\n    assert add(1, 1) == 2\n"
+        ),
+    }
+    bundle.coding.search_index = {
+        "src/app.py": "add helper",
+        "tests/test_app.py": "unit tests for add",
+    }
     return bundle
 
 
 def simulator_for_kind(
     bundle: CompanySimulatorBundle, kind: CompanyAgentKind
-) -> GTMSimulator | OperationsSimulator | LegalSimulator | AccountsSimulator:
+) -> (
+    GTMSimulator
+    | OperationsSimulator
+    | LegalSimulator
+    | AccountsSimulator
+    | CodingSimulator
+):
     if kind is CompanyAgentKind.GTM:
         return bundle.gtm
     if kind is CompanyAgentKind.OPERATIONS:
         return bundle.operations
     if kind is CompanyAgentKind.LEGAL:
         return bundle.legal
+    if kind is CompanyAgentKind.CODING:
+        return bundle.coding
     return bundle.accounts
 
 
 __all__ = [
     "AccountsSimulator",
+    "CodingSimulator",
     "CompanySimulatorBundle",
     "GTMSimulator",
     "LegalSimulator",

@@ -25,6 +25,8 @@ from .model_matrix import (
     default_model_tasks,
     default_tool_bindings,
 )
+from .operator_loop import run_operator_loop, write_operator_artifacts
+from .operator_tasks import operator_plan_payload
 from .optimizations import BASELINE_CONFIG, OPTIMIZED_CONFIG
 from .pricing import default_pricing_catalog_path, load_pricing_catalog
 
@@ -77,6 +79,29 @@ def main(arguments: Sequence[str] | None = None) -> int:
         "--agent",
         default="all",
         choices=("all", "gtm", "operations", "legal", "accounts"),
+    )
+    operator_plan = subcommands.add_parser(
+        "operator-plan",
+        help="Print accounts/legal/coding operator-loop tasks",
+    )
+    operator_plan.add_argument(
+        "--agent",
+        default="all",
+        choices=("all", "accounts", "legal", "coding"),
+    )
+    operator_run = subcommands.add_parser(
+        "operator-run",
+        help="Run offline operator loop with named approval resume",
+    )
+    operator_run.add_argument(
+        "--agent",
+        default="all",
+        choices=("all", "accounts", "legal", "coding"),
+    )
+    operator_run.add_argument(
+        "--output-dir",
+        default="operator-loop-output",
+        help="Directory for operator evidence JSONL and suite JSON",
     )
     company_run = subcommands.add_parser(
         "company-run",
@@ -151,6 +176,14 @@ def main(arguments: Sequence[str] | None = None) -> int:
         )
         payload = {"aggregate": aggregate, "release_gates": gates.to_payload()}
         if not gates.passed:
+            exit_code = 1
+    elif parsed.command == "operator-plan":
+        payload = operator_plan_payload(_parse_operator_agent(parsed.agent))
+    elif parsed.command == "operator-run":
+        result = run_operator_loop(_parse_operator_agent(parsed.agent))
+        write_operator_artifacts(parsed.output_dir, result)
+        payload = result.to_payload()
+        if not result.passed:
             exit_code = 1
     else:
         if not parsed.confirm_live_api:
@@ -230,6 +263,12 @@ def _agent_plan_payload() -> dict[str, Any]:
             for case in default_agent_eval_cases()
         ],
     }
+
+
+def _parse_operator_agent(value: str) -> CompanyAgentKind | None:
+    if value == "all":
+        return None
+    return CompanyAgentKind(value)
 
 
 def _parse_company_agent(value: str) -> CompanyAgentKind | None:

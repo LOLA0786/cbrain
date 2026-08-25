@@ -9,7 +9,7 @@ from types import MappingProxyType
 from typing import Any
 
 from cbrain.agent import RunStatus
-from cbrain.company.kinds import CompanyAgentKind
+from cbrain.company.kinds import MATRIX_AGENT_KINDS, CompanyAgentKind
 from cbrain.company.risk import ToolRiskLevel
 from cbrain.company.simulators import load_fixture_bundle
 from cbrain.models import TextOutput, ToolCall
@@ -92,14 +92,15 @@ class CompanyEvalCase:
 def validate_suite(cases: tuple[CompanyEvalCase, ...]) -> None:
     seen: set[str] = set()
     by_agent: dict[CompanyAgentKind, dict[CompanyScenarioCategory, int]] = {
-        kind: dict.fromkeys(CompanyScenarioCategory, 0) for kind in CompanyAgentKind
+        kind: dict.fromkeys(CompanyScenarioCategory, 0)
+        for kind in MATRIX_AGENT_KINDS
     }
     for case in cases:
         if case.case_id in seen:
             raise ValueError(f"duplicate case_id {case.case_id!r}")
         seen.add(case.case_id)
         by_agent[case.agent_kind][case.category] += 1
-    for kind in CompanyAgentKind:
+    for kind in MATRIX_AGENT_KINDS:
         for category, expected in _CATEGORY_COUNTS.items():
             actual = by_agent[kind][category]
             if actual != expected:

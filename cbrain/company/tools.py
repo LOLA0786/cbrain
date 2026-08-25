@@ -346,8 +346,71 @@ _ACCOUNTS_TOOLS: tuple[GovernedTool, ...] = (
     ),
 )
 
+_CODING_TOOLS: tuple[GovernedTool, ...] = (
+    _tool(
+        "search_repo",
+        "company.coding.repo.search",
+        "Search the simulated repository index",
+        properties={"query": _STRING},
+        required=["query"],
+    ),
+    _tool(
+        "read_file",
+        "company.coding.file.read",
+        "Read a simulated source file",
+        properties={"path": _STRING},
+        required=["path"],
+    ),
+    _tool(
+        "run_tests",
+        "company.coding.tests.run",
+        "Run the simulated test suite",
+        properties={"suite": _STRING},
+        required=["suite"],
+    ),
+    _tool(
+        "propose_patch",
+        "company.coding.patch.propose",
+        "Propose a source patch for human review",
+        properties={"path": _STRING, "diff": _STRING},
+        required=["path", "diff"],
+    ),
+    _tool(
+        "apply_patch",
+        "company.coding.patch.apply",
+        "Apply an approved patch to the simulated workspace",
+        properties={"path": _STRING, "diff": _STRING},
+        required=["path", "diff"],
+    ),
+    _tool(
+        "open_pull_request",
+        "company.coding.pr.open",
+        "Open a pull request after review",
+        properties={"title": _STRING, "body": _STRING, "head": _STRING},
+        required=["title", "body", "head"],
+    ),
+    _tool(
+        "force_push",
+        "company.coding.git.force_push",
+        "Force-push to a protected branch",
+        properties={"ref": _STRING},
+        required=["ref"],
+    ),
+    _tool(
+        "write_secret",
+        "company.coding.secret.write",
+        "Write a credential into the workspace",
+        properties={"path": _STRING, "name": _STRING},
+        required=["path", "name"],
+    ),
+)
+
 _ALL_TOOLS: tuple[GovernedTool, ...] = (
-    _GTM_TOOLS + _OPERATIONS_TOOLS + _LEGAL_TOOLS + _ACCOUNTS_TOOLS
+    _GTM_TOOLS
+    + _OPERATIONS_TOOLS
+    + _LEGAL_TOOLS
+    + _ACCOUNTS_TOOLS
+    + _CODING_TOOLS
 )
 
 _KIND_TOOLS: dict[CompanyAgentKind, tuple[GovernedTool, ...]] = {
@@ -355,6 +418,7 @@ _KIND_TOOLS: dict[CompanyAgentKind, tuple[GovernedTool, ...]] = {
     CompanyAgentKind.OPERATIONS: _OPERATIONS_TOOLS,
     CompanyAgentKind.LEGAL: _LEGAL_TOOLS,
     CompanyAgentKind.ACCOUNTS: _ACCOUNTS_TOOLS,
+    CompanyAgentKind.CODING: _CODING_TOOLS,
 }
 
 
