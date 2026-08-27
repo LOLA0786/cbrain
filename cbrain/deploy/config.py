@@ -63,9 +63,12 @@ def load(path: str | Path) -> DeploymentConfig:
     if not isinstance(raw, dict):
         raise ConfigurationError("config root must be an object")
 
-    digest = "sha256:" + hashlib.sha256(
-        json.dumps(raw, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
+    digest = (
+        "sha256:"
+        + hashlib.sha256(
+            json.dumps(raw, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+    )
 
     routes = _load_routes(raw.get("routes"))
 
@@ -91,9 +94,7 @@ def load(path: str | Path) -> DeploymentConfig:
         routes=routes,
         witness_component_id=_text(raw, "witness_component_id"),
         witness_signer_key_id=_text(raw, "witness_signer_key_id"),
-        request_timeout_seconds=float(
-            raw.get("request_timeout_seconds", 5.0)
-        ),
+        request_timeout_seconds=float(raw.get("request_timeout_seconds", 5.0)),
         config_digest=digest,
     )
 
@@ -120,14 +121,10 @@ def _load_routes(value: object) -> dict[str, ToolRoute]:
                 credential_audience=entry["credential_audience"],
                 peer_identity=entry["peer_identity"],
                 allowed_parameters=tuple(entry.get("allowed_parameters", ())),
-                required_parameters=tuple(
-                    entry.get("required_parameters", ())
-                ),
+                required_parameters=tuple(entry.get("required_parameters", ())),
             )
         except (KeyError, ValueError) as exc:
-            raise ConfigurationError(
-                f"route {tool_name!r} is invalid: {exc}"
-            ) from exc
+            raise ConfigurationError(f"route {tool_name!r} is invalid: {exc}") from exc
 
     return routes
 

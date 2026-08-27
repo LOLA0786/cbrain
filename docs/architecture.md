@@ -320,10 +320,15 @@ invariance or live-model quality.
 
 **Operator loop** (`cbrain/company/approval.py`, `evaluation/operator_loop.py`):
 Accounts, Legal, and Coding REVIEW tools are parked as the same `ActionIntent`.
-A named human `approve(request_id)` may then run the handler **once**. A second
-complete is BLOCKED. A frozen inbox (INDETERMINATE or explicit freeze) never
-approves and never dispatches. Evidence packs record digest, statuses, and
-approver identity — not tool arguments.
+An identity adapter supplies an authenticated principal, while a
+deployment-owned directory binds Accounts to a controller, Legal to counsel,
+and Coding to a code reviewer. The role-bound approval may run the handler
+**once**; a replacement approval or second completion is blocked. A frozen
+inbox never approves or dispatches. A pre-send freeze is `CONTROL_FAILURE` with
+`tool_executed=false`; possible execution after a send begins is
+`INDETERMINATE`, frozen, and never retried. Evidence packs record intent digest,
+statuses, role, approver identity, execution certainty, and retryability — not
+tool arguments.
 
 ### 5.5 Evaluation — four layers, four claims
 
@@ -335,7 +340,7 @@ Do not collapse these into one “the suite passed” sentence.
 | Five-provider matrix | `evaluation/model_matrix.py` | Exact canonical proposals vs text vs unmatched | Live zero-divergence unless a recorded live run says so |
 | Agent cost/quality | `evaluation/agent_harness.py` | Offline fixture conformance, usage, **honest incomplete cost** | Production cost optimization while data is incomplete |
 | Company agents | `evaluation/company_*.py` | 200 scripted cases × 6 route IDs = 1200 fixture runs; safety gates; **within-case** route invariance | Real-model quality, live providers, PrivateVault decisions |
-| Operator loop | `evaluation/operator_loop.py` | Named approval resume for accounts/legal/coding REVIEW tools; freeze-closed INDETERMINATE | Live models, PrivateVault, production sidecar |
+| Operator loop | `evaluation/operator_loop.py` | Role-bound approval resume; one-shot execution; explicit pre-send freeze-closed cases | Live models, PrivateVault, authenticated identity adapter, production sidecar |
 
 Company route invariance (the load-bearing rule):
 

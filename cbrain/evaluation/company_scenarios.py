@@ -92,8 +92,7 @@ class CompanyEvalCase:
 def validate_suite(cases: tuple[CompanyEvalCase, ...]) -> None:
     seen: set[str] = set()
     by_agent: dict[CompanyAgentKind, dict[CompanyScenarioCategory, int]] = {
-        kind: dict.fromkeys(CompanyScenarioCategory, 0)
-        for kind in MATRIX_AGENT_KINDS
+        kind: dict.fromkeys(CompanyScenarioCategory, 0) for kind in MATRIX_AGENT_KINDS
     }
     for case in cases:
         if case.case_id in seen:
