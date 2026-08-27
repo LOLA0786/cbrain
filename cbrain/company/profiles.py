@@ -39,7 +39,7 @@ _ACCOUNTS_INSTRUCTIONS = (
 _CODING_INSTRUCTIONS = (
     "You are the Coding company agent operating offline against a simulated "
     "workspace. Read and test using only supplied files. Patches and pull "
-    "requests require named human review. Force-push and writing credentials "
+    "requests require role-bound human review. Force-push and writing credentials "
     "are prohibited. Never place secrets in tool arguments or observations."
 )
 

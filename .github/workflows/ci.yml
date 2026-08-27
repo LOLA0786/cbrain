@@ -58,7 +58,10 @@ jobs:
           print("PrivateVault conformance dependencies: OK")
           PY
 
-      - name: Ruff
+      - name: Ruff format
+        run: uv run ruff format --check cbrain integrations tests
+
+      - name: Ruff lint
         run: uv run ruff check cbrain integrations tests
 
       - name: Mypy
@@ -69,3 +72,12 @@ jobs:
 
       - name: Full test suite
         run: uv run python -m pytest -q
+
+      - name: Compile Python sources
+        run: uv run python -m compileall -q cbrain tests
+
+      - name: Verify dependency lock
+        run: uv lock --check
+
+      - name: Check whitespace errors
+        run: git diff --check

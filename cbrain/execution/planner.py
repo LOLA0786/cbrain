@@ -68,9 +68,7 @@ class ToolRoute:
 
         missing = set(self.required_parameters) - set(self.allowed_parameters)
         if missing:
-            raise ValueError(
-                f"required parameters not in allowlist: {sorted(missing)}"
-            )
+            raise ValueError(f"required parameters not in allowlist: {sorted(missing)}")
 
 
 class HttpDispatchPlanner:
@@ -125,11 +123,8 @@ class HttpDispatchPlanner:
             "tool_artifact_digest": route.tool_artifact_digest
             or _digest(route.operation.encode("utf-8")),
             "credential_audience": route.credential_audience,
-            "idempotency_key_digest": _digest(
-                action.idempotency_key.encode("utf-8")
-            ),
-            "retry_policy_digest": route.retry_policy_digest
-            or _digest(b"no-retry"),
+            "idempotency_key_digest": _digest(action.idempotency_key.encode("utf-8")),
+            "retry_policy_digest": route.retry_policy_digest or _digest(b"no-retry"),
         }
 
         return PlannedDispatch(
@@ -158,9 +153,7 @@ class HttpDispatchPlanner:
             raise DispatchPlanningError("action arguments must be a mapping")
 
         allowed = set(route.allowed_parameters)
-        filtered = {
-            key: value for key, value in raw.items() if key in allowed
-        }
+        filtered = {key: value for key, value in raw.items() if key in allowed}
 
         missing = set(route.required_parameters) - set(filtered)
         if missing:
@@ -188,9 +181,7 @@ def _canonical_bytes(payload: Mapping[str, Any]) -> bytes:
             sort_keys=True,
         ).encode("utf-8")
     except (TypeError, ValueError) as exc:
-        raise DispatchPlanningError(
-            "arguments are not canonically encodable"
-        ) from exc
+        raise DispatchPlanningError("arguments are not canonically encodable") from exc
 
 
 def _is_json_safe(value: object) -> bool:
@@ -205,8 +196,7 @@ def _is_json_safe(value: object) -> bool:
         return True
     if isinstance(value, Mapping):
         return all(
-            isinstance(key, str) and _is_json_safe(item)
-            for key, item in value.items()
+            isinstance(key, str) and _is_json_safe(item) for key, item in value.items()
         )
     if isinstance(value, (list, tuple)):
         return all(_is_json_safe(item) for item in value)

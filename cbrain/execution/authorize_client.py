@@ -79,9 +79,7 @@ class PrivateVaultAuthorizationClient:
             "expected_peer_identity_digest": _digest(prepared.peer_identity_bytes),
             "decision_receipt_digest": self._digests.decision_receipt_digest,
             "authority_receipt_digest": self._digests.authority_receipt_digest,
-            "approval_artifact_digest": (
-                self._digests.approval_artifact_digest
-            ),
+            "approval_artifact_digest": (self._digests.approval_artifact_digest),
             "state_snapshot_digest": self._digests.state_snapshot_digest,
             "policy_bundle_digest": self._digests.policy_bundle_digest,
             "obligations_digest": self._digests.obligations_digest,
@@ -109,15 +107,9 @@ class PrivateVaultAuthorizationClient:
             authorization=_snapshot(authorization),
             trust_bundle=_snapshot(trust_bundle),
             binding_digests={
-                "decision_receipt_digest": (
-                    self._digests.decision_receipt_digest
-                ),
-                "authority_receipt_digest": (
-                    self._digests.authority_receipt_digest
-                ),
-                "approval_artifact_digest": (
-                    self._digests.approval_artifact_digest
-                ),
+                "decision_receipt_digest": (self._digests.decision_receipt_digest),
+                "authority_receipt_digest": (self._digests.authority_receipt_digest),
+                "approval_artifact_digest": (self._digests.approval_artifact_digest),
                 "state_snapshot_digest": self._digests.state_snapshot_digest,
                 "policy_bundle_digest": self._digests.policy_bundle_digest,
                 "obligations_digest": self._digests.obligations_digest,
@@ -138,12 +130,8 @@ class PrivateVaultAuthorizationClient:
         else's action. The signature proves authenticity, not relevance.
         """
         echoed = authorization.get("request_id")
-        if not isinstance(echoed, str) or not compare_digest(
-            echoed, action.request_id
-        ):
-            raise AuthorizationRefused(
-                "authorization answers a different request"
-            )
+        if not isinstance(echoed, str) or not compare_digest(echoed, action.request_id):
+            raise AuthorizationRefused("authorization answers a different request")
 
         for field in (
             "expected_wire_bytes_digest",
@@ -151,12 +139,10 @@ class PrivateVaultAuthorizationClient:
             "organisation_id",
         ):
             issued = authorization.get(field)
-            expected = sent[field] if field != "organisation_id" else (
-                self._organisation_id
+            expected = (
+                sent[field] if field != "organisation_id" else (self._organisation_id)
             )
-            if not isinstance(issued, str) or not compare_digest(
-                issued, str(expected)
-            ):
+            if not isinstance(issued, str) or not compare_digest(issued, str(expected)):
                 raise AuthorizationRefused(
                     f"authorization {field} does not match the request"
                 )
@@ -164,14 +150,10 @@ class PrivateVaultAuthorizationClient:
         if authorization.get("expected_wire_bytes_length") != len(
             planned.prepared.wire_bytes
         ):
-            raise AuthorizationRefused(
-                "authorization wire byte length does not match"
-            )
+            raise AuthorizationRefused("authorization wire byte length does not match")
 
         if authorization.get("max_uses") != 1:
-            raise AuthorizationRefused(
-                "authorization is not single-use"
-            )
+            raise AuthorizationRefused("authorization is not single-use")
 
         if authorization.get("dispatch") != dict(planned.prepared.dispatch):
             raise AuthorizationRefused(

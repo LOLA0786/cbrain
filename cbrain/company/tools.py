@@ -406,11 +406,7 @@ _CODING_TOOLS: tuple[GovernedTool, ...] = (
 )
 
 _ALL_TOOLS: tuple[GovernedTool, ...] = (
-    _GTM_TOOLS
-    + _OPERATIONS_TOOLS
-    + _LEGAL_TOOLS
-    + _ACCOUNTS_TOOLS
-    + _CODING_TOOLS
+    _GTM_TOOLS + _OPERATIONS_TOOLS + _LEGAL_TOOLS + _ACCOUNTS_TOOLS + _CODING_TOOLS
 )
 
 _KIND_TOOLS: dict[CompanyAgentKind, tuple[GovernedTool, ...]] = {
