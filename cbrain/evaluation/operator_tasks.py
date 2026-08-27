@@ -7,6 +7,11 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
+from cbrain.company.approval import (
+    ApproverRole,
+    fixture_actor_for_role,
+    required_approver_role_for,
+)
 from cbrain.company.kinds import OPERATOR_AGENT_KINDS, CompanyAgentKind
 
 from .company_scenarios import ExpectedDecision
@@ -26,6 +31,8 @@ class OperatorTask:
     require_approval: bool = False
     expect_handler: bool = False
     freeze_before_approval: bool = False
+    required_role: ApproverRole | None = None
+    fixture_actor_id: str | None = None
     authorized_matters: frozenset[str] | None = None
 
     def __post_init__(self) -> None:
@@ -39,9 +46,20 @@ class OperatorTask:
         if self.expect_handler and self.expected_decision is ExpectedDecision.BLOCK:
             raise ValueError("blocked tasks must not expect a handler")
         if self.freeze_before_approval and not self.require_approval:
-            raise ValueError("freeze_before_approval requires an approval task")
+            raise ValueError("freeze_before_approval requires a review approval path")
         if self.freeze_before_approval and self.expect_handler:
             raise ValueError("frozen tasks must not expect a handler")
+        role = self.required_role
+        actor = self.fixture_actor_id
+        if self.require_approval:
+            if role is None:
+                role = required_approver_role_for(self.tool)
+            if role is None:
+                raise ValueError(f"{self.tool} has no required approver role")
+            if actor is None:
+                actor = fixture_actor_for_role(role)
+            object.__setattr__(self, "required_role", role)
+            object.__setattr__(self, "fixture_actor_id", actor)
 
 
 def _task(
@@ -59,7 +77,9 @@ def _task(
 ) -> OperatorTask:
     handler = expect_handler
     if handler is None:
-        handler = decision is ExpectedDecision.ALLOW or require_approval
+        handler = (
+            decision is ExpectedDecision.ALLOW or require_approval
+        ) and not freeze_before_approval
     return OperatorTask(
         task_id=f"{kind.value}-operator-{index:03d}",
         agent_kind=kind,
@@ -157,13 +177,13 @@ def _accounts_tasks() -> tuple[OperatorTask, ...]:
         _task(
             kind=kind,
             index=9,
-            title="Frozen payment approval fails closed",
+            title="Freeze payment before controller approval",
             tool="execute_payment",
             arguments=payment,
             decision=ExpectedDecision.REVIEW,
             require_approval=True,
-            expect_handler=False,
             freeze_before_approval=True,
+            expect_handler=False,
         ),
     )
 
@@ -250,13 +270,13 @@ def _legal_tasks() -> tuple[OperatorTask, ...]:
         _task(
             kind=kind,
             index=9,
-            title="Frozen legal approval fails closed",
+            title="Freeze commitment before counsel approval",
             tool="send_commitment",
-            arguments={"matter_id": "matter-a", "text": "We agree."},
+            arguments={"matter_id": "matter-a", "text": "We agree to the redline."},
             decision=ExpectedDecision.REVIEW,
             require_approval=True,
-            expect_handler=False,
             freeze_before_approval=True,
+            expect_handler=False,
             authorized_matters=matter_a,
         ),
     )
@@ -341,13 +361,13 @@ def _coding_tasks() -> tuple[OperatorTask, ...]:
         _task(
             kind=kind,
             index=9,
-            title="Frozen code review fails closed",
+            title="Freeze patch before code-reviewer approval",
             tool="apply_patch",
             arguments=patch,
             decision=ExpectedDecision.REVIEW,
             require_approval=True,
-            expect_handler=False,
             freeze_before_approval=True,
+            expect_handler=False,
         ),
     )
 
@@ -400,6 +420,10 @@ def operator_plan_payload(kind: CompanyAgentKind | None = None) -> dict[str, obj
                 "expected_decision": task.expected_decision.value,
                 "require_approval": task.require_approval,
                 "freeze_before_approval": task.freeze_before_approval,
+                "required_role": (
+                    None if task.required_role is None else task.required_role.value
+                ),
+                "fixture_actor_id": task.fixture_actor_id,
             }
             for task in tasks
         ],

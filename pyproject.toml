@@ -18,7 +18,8 @@ dev = [
   "mypy>=1.15",
   "pytest>=8.3,<10",
   "pytest-cov>=6",
-  "ruff>=0.11"
+  "ruff>=0.11",
+  "pynacl>=1.5",
 ]
 frameworks = [
     "autogen-agentchat>=0.7.5",

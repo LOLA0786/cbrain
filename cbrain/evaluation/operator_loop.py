@@ -1,4 +1,4 @@
-"""Offline operator loop: park REVIEW, role approve, execute once, freeze closed."""
+"""Offline operator loop: park REVIEW, role-bound approve, execute once, freeze closed."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from types import MappingProxyType
 from typing import Any
 
 from cbrain import ActionIntent, ExecutionStatus, GovernedExecution, GovernedRuntime
@@ -14,9 +13,9 @@ from cbrain.company.approval import (
     ApprovalBoundedGateway,
     ApprovalInbox,
     ApprovalInboxError,
-    ApprovalPrincipal,
     ApprovalRecord,
-    ApprovalRole,
+    TrustedCallerContext,
+    trusted_caller,
 )
 from cbrain.company.authority import CompanyExecutionContext
 from cbrain.company.governance import CompanyRiskGateway
@@ -30,43 +29,21 @@ from cbrain.evaluation.company_scenarios import ExpectedDecision
 from .operator_tasks import OperatorTask, operator_tasks_for
 
 EVIDENCE_SCHEMA = "cbrain-operator-evidence/v1"
-
-CONTROLLER_PRINCIPAL = ApprovalPrincipal(
-    actor_id="operator-controller-1",
-    role=ApprovalRole.CONTROLLER,
-)
-COUNSEL_PRINCIPAL = ApprovalPrincipal(
-    actor_id="operator-counsel-1",
-    role=ApprovalRole.COUNSEL,
-)
-CODE_REVIEWER_PRINCIPAL = ApprovalPrincipal(
-    actor_id="operator-code-reviewer-1",
-    role=ApprovalRole.CODE_REVIEWER,
-)
-
-APPROVER_DIRECTORY = MappingProxyType(
+FORBIDDEN_EVIDENCE_KEYS = frozenset(
     {
-        ApprovalRole.CONTROLLER: frozenset({CONTROLLER_PRINCIPAL.actor_id}),
-        ApprovalRole.COUNSEL: frozenset({COUNSEL_PRINCIPAL.actor_id}),
-        ApprovalRole.CODE_REVIEWER: frozenset({CODE_REVIEWER_PRINCIPAL.actor_id}),
-    }
-)
-
-_PRINCIPAL_BY_AGENT = MappingProxyType(
-    {
-        CompanyAgentKind.ACCOUNTS: CONTROLLER_PRINCIPAL,
-        CompanyAgentKind.LEGAL: COUNSEL_PRINCIPAL,
-        CompanyAgentKind.CODING: CODE_REVIEWER_PRINCIPAL,
-    }
-)
-
-_APPROVAL_ROLE_BY_TOOL = MappingProxyType(
-    {
-        "execute_payment": ApprovalRole.CONTROLLER,
-        "send_commitment": ApprovalRole.COUNSEL,
-        "apply_patch": ApprovalRole.CODE_REVIEWER,
-        "propose_patch": ApprovalRole.CODE_REVIEWER,
-        "open_pull_request": ApprovalRole.CODE_REVIEWER,
+        "arguments",
+        "credential",
+        "credentials",
+        "endpoint",
+        "endpoints",
+        "payload",
+        "raw_payload",
+        "secret",
+        "secrets",
+        "tool_payload",
+        "api_key",
+        "password",
+        "token",
     }
 )
 
@@ -80,18 +57,16 @@ class OperatorRunRecord:
     action_intent_digest: str
     first_status: str
     final_status: str
-    tool_executed: bool | None
-    retryable: bool
     handler_invocations: int
-    required_approval_role: str | None
     approved_by: str | None
-    approved_role: str | None
+    trusted_approver_role: str | None
     frozen: bool
+    retryable: bool
     success: bool
     reason: str
 
     def to_payload(self) -> dict[str, Any]:
-        return {
+        payload = {
             "schema": EVIDENCE_SCHEMA,
             "task_id": self.task_id,
             "agent_kind": self.agent_kind,
@@ -100,13 +75,11 @@ class OperatorRunRecord:
             "action_intent_digest": self.action_intent_digest,
             "first_status": self.first_status,
             "final_status": self.final_status,
-            "tool_executed": self.tool_executed,
-            "retryable": self.retryable,
             "handler_invocations": self.handler_invocations,
-            "required_approval_role": self.required_approval_role,
             "approved_by": self.approved_by,
-            "approved_role": self.approved_role,
+            "trusted_approver_role": self.trusted_approver_role,
             "frozen": self.frozen,
+            "retryable": self.retryable,
             "success": self.success,
             "reason": self.reason,
             "decision_authority": "company_test_gateway",
@@ -114,6 +87,8 @@ class OperatorRunRecord:
             "live_provider_calls": 0,
             "real_model_quality": "not_evaluated",
         }
+        _assert_evidence_privacy(payload)
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,7 +100,7 @@ class OperatorSuiteResult:
         return all(record.success for record in self.records)
 
     def to_payload(self) -> dict[str, Any]:
-        return {
+        payload = {
             "schema": "cbrain-operator-suite/v1",
             "passed": self.passed,
             "total_tasks": len(self.records),
@@ -133,8 +108,12 @@ class OperatorSuiteResult:
             "live_provider_calls": 0,
             "real_model_quality": "not_evaluated",
             "decision_authority": "company_test_gateway",
+            "execution_mode": "offline_fixture",
+            "indeterminate_retryable": False,
             "records": [record.to_payload() for record in self.records],
         }
+        _assert_evidence_privacy(payload)
+        return payload
 
 
 def run_operator_loop(kind: CompanyAgentKind | None = None) -> OperatorSuiteResult:
@@ -145,19 +124,16 @@ def run_operator_loop(kind: CompanyAgentKind | None = None) -> OperatorSuiteResu
 def run_operator_task(
     task: OperatorTask,
     *,
-    principal: ApprovalPrincipal | None = None,
-    freeze_before_approve: bool = False,
+    caller: TrustedCallerContext | None = None,
+    freeze_before_approve: bool | None = None,
 ) -> OperatorRunRecord:
     spec = spec_for_kind(task.agent_kind)
     bundle = load_fixture_bundle("default")
     context = _context_for(task)
-    inbox = ApprovalInbox(allowed_approvers=APPROVER_DIRECTORY)
+    inbox = ApprovalInbox()
     inner = CompanyRiskGateway(spec, context=context, bundle=bundle)
     gateway = ApprovalBoundedGateway(
-        inner,
-        inbox,
-        digest_for=canonical_action_intent_digest,
-        required_role_for=_required_approval_role,
+        inner, inbox, digest_for=canonical_action_intent_digest
     )
     runtime = GovernedRuntime(gateway)
     handlers = build_handlers(kind=task.agent_kind, bundle=bundle, context=context)
@@ -176,30 +152,38 @@ def run_operator_task(
         request_id=f"operator-{task.task_id}",
     )
     digest = canonical_action_intent_digest(action)
-    required_role = _required_approval_role(action)
     first = runtime.execute(action, counted)
     approval: ApprovalRecord | None = None
     final = first
-    expected_freeze = task.freeze_before_approval or freeze_before_approve
-    if expected_freeze:
-        inbox.freeze("operator_control_state_frozen")
+    freeze = (
+        task.freeze_before_approval
+        if freeze_before_approve is None
+        else freeze_before_approve
+    )
+    if freeze:
+        inbox.freeze("indeterminate_not_retried")
     if task.require_approval and first.status is ExecutionStatus.REVIEW_REQUIRED:
-        selected_principal = principal or _PRINCIPAL_BY_AGENT[task.agent_kind]
         try:
             approval = inbox.approve(
-                action.request_id,
-                principal=selected_principal,
+                action.request_id, caller=_caller_for(task, caller)
             )
             final = runtime.execute(action, counted)
         except ApprovalInboxError as exc:
-            if inbox.frozen:
-                final = runtime.execute(action, counted)
+            if freeze or task.freeze_before_approval:
+                final = GovernedExecution(
+                    status=ExecutionStatus.INDETERMINATE,
+                    request_id=action.request_id,
+                    tool_executed=None,
+                    reason=str(exc),
+                    retryable=False,
+                )
             else:
                 final = GovernedExecution(
                     status=ExecutionStatus.CONTROL_FAILURE,
                     request_id=action.request_id,
                     tool_executed=False,
                     reason=str(exc),
+                    retryable=False,
                 )
     if final.status is ExecutionStatus.INDETERMINATE:
         inbox.freeze("indeterminate_not_retried")
@@ -209,7 +193,8 @@ def run_operator_task(
         final=final,
         handler_calls=handler_calls["count"],
         frozen=inbox.frozen,
-        expected_freeze=expected_freeze,
+        approved=approval is not None,
+        unexpected_freeze=freeze and not task.freeze_before_approval,
     )
     return OperatorRunRecord(
         task_id=task.task_id,
@@ -219,13 +204,11 @@ def run_operator_task(
         action_intent_digest=digest,
         first_status=first.status.value,
         final_status=final.status.value,
-        tool_executed=final.tool_executed,
-        retryable=final.retryable,
         handler_invocations=handler_calls["count"],
-        required_approval_role=None if required_role is None else required_role.value,
         approved_by=None if approval is None else approval.actor_id,
-        approved_role=None if approval is None else approval.actor_role.value,
+        trusted_approver_role=None if approval is None else approval.role.value,
         frozen=inbox.frozen,
+        retryable=final.retryable,
         success=success,
         reason=final.reason,
     )
@@ -247,23 +230,34 @@ def write_operator_artifacts(
     (directory / "summary.md").write_text(_summary_markdown(result), encoding="utf-8")
 
 
+def _caller_for(
+    task: OperatorTask, override: TrustedCallerContext | None
+) -> TrustedCallerContext:
+    if override is not None:
+        return override
+    if task.fixture_actor_id is None:
+        raise ApprovalInboxError("task has no fixture actor")
+    return trusted_caller(task.fixture_actor_id)
+
+
 def _task_succeeded(
     task: OperatorTask,
     *,
-    first: GovernedExecution,
-    final: GovernedExecution,
+    first: Any,
+    final: Any,
     handler_calls: int,
     frozen: bool,
-    expected_freeze: bool,
+    approved: bool,
+    unexpected_freeze: bool,
 ) -> bool:
-    if expected_freeze:
+    if task.freeze_before_approval:
         return (
-            first.status is ExecutionStatus.REVIEW_REQUIRED
-            and final.status is ExecutionStatus.CONTROL_FAILURE
-            and final.tool_executed is False
-            and final.retryable is False
+            frozen
+            and not approved
             and handler_calls == 0
-            and frozen
+            and final.status is ExecutionStatus.INDETERMINATE
+            and final.retryable is False
+            and first.status is ExecutionStatus.REVIEW_REQUIRED
         )
     expected_final = {
         ExpectedDecision.ALLOW: ExecutionStatus.EXECUTED,
@@ -274,17 +268,15 @@ def _task_succeeded(
         ),
         ExpectedDecision.BLOCK: ExecutionStatus.BLOCKED,
     }[task.expected_decision]
-    if frozen or final.status is ExecutionStatus.INDETERMINATE:
+    if frozen or unexpected_freeze:
+        return False
+    if final.status is ExecutionStatus.INDETERMINATE:
         return False
     if handler_calls != (1 if task.expect_handler else 0):
         return False
     if task.require_approval and first.status is not ExecutionStatus.REVIEW_REQUIRED:
         return False
     return final.status is expected_final
-
-
-def _required_approval_role(action: ActionIntent) -> ApprovalRole | None:
-    return _APPROVAL_ROLE_BY_TOOL.get(action.tool_name)
 
 
 def _context_for(task: OperatorTask) -> CompanyExecutionContext:
@@ -303,30 +295,50 @@ def _context_for(task: OperatorTask) -> CompanyExecutionContext:
 
 
 def _summary_markdown(result: OperatorSuiteResult) -> str:
+    freeze_count = sum(1 for record in result.records if record.frozen)
     lines = [
         "# Operator loop",
         "",
         f"- Passed: `{str(result.passed).lower()}`",
         f"- Tasks: {len(result.records)}",
+        f"- Explicit freeze-before-approval records: {freeze_count}",
         "- Decision authority: `company_test_gateway`",
         "- Live provider calls: `0`",
         "- Real-model quality: `not_evaluated`",
+        "- Execution mode: `offline_fixture`",
         "",
-        "REVIEW tools execute only after a role-bound approval of the parked",
-        "ActionIntent. A pre-send frozen inbox fails with CONTROL_FAILURE and",
-        "does not dispatch. A possible post-send execution would be recorded as",
-        "INDETERMINATE, frozen, and never retried.",
+        "REVIEW tools execute only after a trusted-role approval of the parked",
+        "ActionIntent. Identity and role come from caller context, never from",
+        "model arguments. INDETERMINATE runs are frozen and never retried.",
+        "The existing non-freeze tasks do not demonstrate freezing.",
         "",
     ]
     return "\n".join(lines) + "\n"
 
 
+def _assert_evidence_privacy(payload: Mapping[str, Any]) -> None:
+    for key in _walk_keys(payload):
+        normalized = key.lower().replace("-", "_")
+        if normalized in FORBIDDEN_EVIDENCE_KEYS:
+            raise ValueError(f"operator evidence must not contain {key!r}")
+
+
+def _walk_keys(value: Any) -> list[str]:
+    keys: list[str] = []
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            if isinstance(key, str):
+                keys.append(key)
+            keys.extend(_walk_keys(item))
+    elif isinstance(value, list):
+        for item in value:
+            keys.extend(_walk_keys(item))
+    return keys
+
+
 __all__ = [
-    "APPROVER_DIRECTORY",
-    "CODE_REVIEWER_PRINCIPAL",
-    "CONTROLLER_PRINCIPAL",
-    "COUNSEL_PRINCIPAL",
     "EVIDENCE_SCHEMA",
+    "FORBIDDEN_EVIDENCE_KEYS",
     "OperatorRunRecord",
     "OperatorSuiteResult",
     "run_operator_loop",

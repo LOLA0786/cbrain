@@ -11,16 +11,14 @@ import json
 from typing import Any
 
 import pytest
+from nacl.signing import SigningKey
 
-nacl_signing = pytest.importorskip("nacl.signing")
-SigningKey = nacl_signing.SigningKey
+import agent_dna.authority_v01 as authority_v01
+import agent_dna.closure_v01 as closure_v01
+import agent_dna.dispatch_v01 as dispatch_v01
+import agent_dna.execution_v01 as execution_v01
 
-authority_v01 = pytest.importorskip("agent_dna.authority_v01")
-execution_v01 = pytest.importorskip("agent_dna.execution_v01")
-dispatch_v01 = pytest.importorskip("agent_dna.dispatch_v01")
-closure_v01 = pytest.importorskip("agent_dna.closure_v01")
-
-from cbrain import ActionIntent, ExecutionStatus, GovernedRuntime  # noqa: E402
+from cbrain import ActionIntent, ExecutionStatus, GovernedRuntime
 from cbrain.adapters.privatevault import (  # noqa: E402
     PrivateVaultDecision,
     PrivateVaultVerdict,

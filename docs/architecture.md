@@ -320,15 +320,15 @@ invariance or live-model quality.
 
 **Operator loop** (`cbrain/company/approval.py`, `evaluation/operator_loop.py`):
 Accounts, Legal, and Coding REVIEW tools are parked as the same `ActionIntent`.
-An identity adapter supplies an authenticated principal, while a
-deployment-owned directory binds Accounts to a controller, Legal to counsel,
-and Coding to a code reviewer. The role-bound approval may run the handler
-**once**; a replacement approval or second completion is blocked. A frozen
-inbox never approves or dispatches. A pre-send freeze is `CONTROL_FAILURE` with
-`tool_executed=false`; possible execution after a send begins is
-`INDETERMINATE`, frozen, and never retried. Evidence packs record intent digest,
-statuses, role, approver identity, execution certainty, and retryability — not
-tool arguments.
+A trusted-role caller (`controller`, `counsel`, `code_reviewer`) may then
+`approve(request_id)` from caller context — never from model arguments — and
+the handler runs **once**. Wrong role, unknown actor, blank actor, actor
+mismatch, duplicate approval, and a second complete fail closed. A frozen
+inbox (INDETERMINATE or explicit freeze-before-approval) never approves and
+never dispatches. Evidence packs record digest, statuses, reason, approver
+identity, and trusted role — not tool arguments. The suite includes one
+explicit freeze-before-approval task per operator agent (27 tasks, 9 each);
+the other tasks do not demonstrate freezing.
 
 ### 5.5 Evaluation — four layers, four claims
 
@@ -340,7 +340,7 @@ Do not collapse these into one “the suite passed” sentence.
 | Five-provider matrix | `evaluation/model_matrix.py` | Exact canonical proposals vs text vs unmatched | Live zero-divergence unless a recorded live run says so |
 | Agent cost/quality | `evaluation/agent_harness.py` | Offline fixture conformance, usage, **honest incomplete cost** | Production cost optimization while data is incomplete |
 | Company agents | `evaluation/company_*.py` | 200 scripted cases × 6 route IDs = 1200 fixture runs; safety gates; **within-case** route invariance | Real-model quality, live providers, PrivateVault decisions |
-| Operator loop | `evaluation/operator_loop.py` | Role-bound approval resume; one-shot execution; explicit pre-send freeze-closed cases | Live models, PrivateVault, authenticated identity adapter, production sidecar |
+| Operator loop | `evaluation/operator_loop.py` | Role-bound approval resume for accounts/legal/coding REVIEW tools; explicit freeze-before-approval; freeze-closed INDETERMINATE | Live models, PrivateVault, production sidecar |
 
 Company route invariance (the load-bearing rule):
 
@@ -417,9 +417,9 @@ python -m compileall -q cbrain tests
 git diff --check
 ```
 
-Typical PR bar: `ruff check cbrain integrations tests`, `mypy cbrain`,
-`uv lock --check`. CI also checks out **pinned** PrivateVault Agent DNA
-for a small real-conformance set.
+Typical PR bar: `ruff format --check`, `ruff check`, `mypy`, full pytest,
+`compileall`, `uv lock --check`, `git diff --check`. CI also checks out
+**pinned** PrivateVault Agent DNA for a small real-conformance set.
 
 ## 10. What this repo is not
 

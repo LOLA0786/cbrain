@@ -2679,6 +2679,7 @@ source = { editable = "." }
 [package.optional-dependencies]
 dev = [
     { name = "mypy" },
+    { name = "pynacl" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "ruff" },
@@ -2705,6 +2706,7 @@ requires-dist = [
     { name = "langchain-openai", marker = "extra == 'frameworks'", specifier = ">=1.4.1" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.15" },
     { name = "privatevault-agent-dna", marker = "extra == 'privatevault'", editable = "../privatevault-agent-dna" },
+    { name = "pynacl", marker = "extra == 'dev'", specifier = ">=1.5" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3,<10" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.11" },

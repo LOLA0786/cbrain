@@ -28,7 +28,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: LOLA0786/privatevault-agent-dna
-          ref: eabc02e806fe4804d7422556af3d1b376742ccfc
+          ref: 3789a21637e99be074b5b68fcc441722b2e94ae5
           path: privatevault-agent-dna
           ssh-key: ${{ secrets.PRIVATEVAULT_REPO_SSH_KEY }}
           persist-credentials: false
@@ -61,23 +61,23 @@ jobs:
       - name: Ruff format
         run: uv run ruff format --check cbrain integrations tests
 
-      - name: Ruff lint
+      - name: Ruff
         run: uv run ruff check cbrain integrations tests
 
       - name: Mypy
         run: uv run mypy cbrain
+
+      - name: Compileall
+        run: uv run python -m compileall -q cbrain tests
+
+      - name: Lockfile
+        run: uv lock --check
+
+      - name: Whitespace
+        run: git diff --check
 
       - name: Mandatory execution-gateway conformance
         run: uv run python -m pytest -q tests/test_execution_gateway_conformance.py
 
       - name: Full test suite
         run: uv run python -m pytest -q
-
-      - name: Compile Python sources
-        run: uv run python -m compileall -q cbrain tests
-
-      - name: Verify dependency lock
-        run: uv lock --check
-
-      - name: Check whitespace errors
-        run: git diff --check
