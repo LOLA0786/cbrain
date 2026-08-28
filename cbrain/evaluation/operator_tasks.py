@@ -11,7 +11,7 @@ from cbrain.company.kinds import OPERATOR_AGENT_KINDS, CompanyAgentKind
 
 from .company_scenarios import ExpectedDecision
 
-OPERATOR_LOOP_VERSION = "company-operator-loop-v0.5.1"
+OPERATOR_LOOP_VERSION = "company-operator-loop-v0.5.2"
 OPERATOR_TASKS_PER_AGENT = 9
 
 

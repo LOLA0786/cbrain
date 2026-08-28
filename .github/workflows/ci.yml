@@ -28,7 +28,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: LOLA0786/privatevault-agent-dna
-          ref: eabc02e806fe4804d7422556af3d1b376742ccfc
+          ref: 3789a21637e99be074b5b68fcc441722b2e94ae5
           path: privatevault-agent-dna
           ssh-key: ${{ secrets.PRIVATEVAULT_REPO_SSH_KEY }}
           persist-credentials: false
