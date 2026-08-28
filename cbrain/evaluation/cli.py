@@ -25,7 +25,11 @@ from .model_matrix import (
     default_model_tasks,
     default_tool_bindings,
 )
-from .operator_loop import run_operator_loop, write_operator_artifacts
+from .operator_loop import (
+    load_offline_eval_identities,
+    run_operator_loop,
+    write_operator_artifacts,
+)
 from .operator_tasks import operator_plan_payload
 from .optimizations import BASELINE_CONFIG, OPTIMIZED_CONFIG
 from .pricing import default_pricing_catalog_path, load_pricing_catalog
@@ -180,7 +184,15 @@ def main(arguments: Sequence[str] | None = None) -> int:
     elif parsed.command == "operator-plan":
         payload = operator_plan_payload(_parse_operator_agent(parsed.agent))
     elif parsed.command == "operator-run":
-        result = run_operator_loop(_parse_operator_agent(parsed.agent))
+        allowed, principals, max_ttl = load_offline_eval_identities(
+            Path(__file__).resolve().parents[2] / "tests" / "operator_fixtures.py"
+        )
+        result = run_operator_loop(
+            _parse_operator_agent(parsed.agent),
+            allowed_approvers=allowed,
+            principal_by_agent=principals,
+            max_ttl_seconds=max_ttl,
+        )
         write_operator_artifacts(parsed.output_dir, result)
         payload = result.to_payload()
         if not result.passed:

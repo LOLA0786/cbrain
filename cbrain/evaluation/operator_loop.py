@@ -1,9 +1,17 @@
-"""Offline operator loop: park REVIEW, role approve, execute once, freeze closed."""
+"""Offline operator loop for role-bound REVIEW resume.
+
+Park a REVIEW ActionIntent, approve from injected caller context, execute
+the handler once, and freeze closed. A freeze before approval or send is
+CONTROL_FAILURE with tool_executed=False. Only a possible post-send
+execution may be INDETERMINATE. Approver identities are injected; this
+module does not ship fixture actor directories.
+"""
 
 from __future__ import annotations
 
+import importlib.util
 import json
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -30,35 +38,6 @@ from cbrain.evaluation.company_scenarios import ExpectedDecision
 from .operator_tasks import OperatorTask, operator_tasks_for
 
 EVIDENCE_SCHEMA = "cbrain-operator-evidence/v1"
-
-CONTROLLER_PRINCIPAL = ApprovalPrincipal(
-    actor_id="operator-controller-1",
-    role=ApprovalRole.CONTROLLER,
-)
-COUNSEL_PRINCIPAL = ApprovalPrincipal(
-    actor_id="operator-counsel-1",
-    role=ApprovalRole.COUNSEL,
-)
-CODE_REVIEWER_PRINCIPAL = ApprovalPrincipal(
-    actor_id="operator-code-reviewer-1",
-    role=ApprovalRole.CODE_REVIEWER,
-)
-
-APPROVER_DIRECTORY = MappingProxyType(
-    {
-        ApprovalRole.CONTROLLER: frozenset({CONTROLLER_PRINCIPAL.actor_id}),
-        ApprovalRole.COUNSEL: frozenset({COUNSEL_PRINCIPAL.actor_id}),
-        ApprovalRole.CODE_REVIEWER: frozenset({CODE_REVIEWER_PRINCIPAL.actor_id}),
-    }
-)
-
-_PRINCIPAL_BY_AGENT = MappingProxyType(
-    {
-        CompanyAgentKind.ACCOUNTS: CONTROLLER_PRINCIPAL,
-        CompanyAgentKind.LEGAL: COUNSEL_PRINCIPAL,
-        CompanyAgentKind.CODING: CODE_REVIEWER_PRINCIPAL,
-    }
-)
 
 _APPROVAL_ROLE_BY_TOOL = MappingProxyType(
     {
@@ -97,6 +76,7 @@ class OperatorRunRecord:
             "agent_kind": self.agent_kind,
             "tool": self.tool,
             "request_id": self.request_id,
+            "intent_digest": self.action_intent_digest,
             "action_intent_digest": self.action_intent_digest,
             "first_status": self.first_status,
             "final_status": self.final_status,
@@ -133,25 +113,68 @@ class OperatorSuiteResult:
             "live_provider_calls": 0,
             "real_model_quality": "not_evaluated",
             "decision_authority": "company_test_gateway",
+            "execution_mode": "offline_fixture",
             "records": [record.to_payload() for record in self.records],
         }
 
 
-def run_operator_loop(kind: CompanyAgentKind | None = None) -> OperatorSuiteResult:
-    records = tuple(run_operator_task(task) for task in operator_tasks_for(kind))
+def load_offline_eval_identities(
+    path: Path,
+) -> tuple[
+    Mapping[ApprovalRole, Collection[str]],
+    Mapping[CompanyAgentKind, ApprovalPrincipal],
+    float,
+]:
+    """Load a deployment-owned or test-injected approver directory from disk."""
+    spec = importlib.util.spec_from_file_location(
+        "cbrain_offline_operator_fixtures", path
+    )
+    if spec is None or spec.loader is None:
+        raise ApprovalInboxError("approver directory file is missing")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return (
+        module.APPROVER_DIRECTORY,
+        module.PRINCIPAL_BY_AGENT,
+        float(module.FIXTURE_MAX_TTL_SECONDS),
+    )
+
+
+def run_operator_loop(
+    kind: CompanyAgentKind | None = None,
+    *,
+    allowed_approvers: Mapping[ApprovalRole, Collection[str]],
+    principal_by_agent: Mapping[CompanyAgentKind, ApprovalPrincipal],
+    max_ttl_seconds: float,
+) -> OperatorSuiteResult:
+    records = tuple(
+        run_operator_task(
+            task,
+            allowed_approvers=allowed_approvers,
+            principal_by_agent=principal_by_agent,
+            max_ttl_seconds=max_ttl_seconds,
+        )
+        for task in operator_tasks_for(kind)
+    )
     return OperatorSuiteResult(records=records)
 
 
 def run_operator_task(
     task: OperatorTask,
     *,
+    allowed_approvers: Mapping[ApprovalRole, Collection[str]],
+    principal_by_agent: Mapping[CompanyAgentKind, ApprovalPrincipal],
+    max_ttl_seconds: float,
     principal: ApprovalPrincipal | None = None,
     freeze_before_approve: bool = False,
 ) -> OperatorRunRecord:
     spec = spec_for_kind(task.agent_kind)
     bundle = load_fixture_bundle("default")
     context = _context_for(task)
-    inbox = ApprovalInbox(allowed_approvers=APPROVER_DIRECTORY)
+    inbox = ApprovalInbox(
+        allowed_approvers=allowed_approvers,
+        max_ttl_seconds=max_ttl_seconds,
+    )
     inner = CompanyRiskGateway(spec, context=context, bundle=bundle)
     gateway = ApprovalBoundedGateway(
         inner,
@@ -184,7 +207,7 @@ def run_operator_task(
     if expected_freeze:
         inbox.freeze("operator_control_state_frozen")
     if task.require_approval and first.status is ExecutionStatus.REVIEW_REQUIRED:
-        selected_principal = principal or _PRINCIPAL_BY_AGENT[task.agent_kind]
+        selected_principal = principal or principal_by_agent[task.agent_kind]
         try:
             approval = inbox.approve(
                 action.request_id,
@@ -200,6 +223,7 @@ def run_operator_task(
                     request_id=action.request_id,
                     tool_executed=False,
                     reason=str(exc),
+                    retryable=False,
                 )
     if final.status is ExecutionStatus.INDETERMINATE:
         inbox.freeze("indeterminate_not_retried")
@@ -322,13 +346,10 @@ def _summary_markdown(result: OperatorSuiteResult) -> str:
 
 
 __all__ = [
-    "APPROVER_DIRECTORY",
-    "CODE_REVIEWER_PRINCIPAL",
-    "CONTROLLER_PRINCIPAL",
-    "COUNSEL_PRINCIPAL",
     "EVIDENCE_SCHEMA",
     "OperatorRunRecord",
     "OperatorSuiteResult",
+    "load_offline_eval_identities",
     "run_operator_loop",
     "run_operator_task",
     "write_operator_artifacts",

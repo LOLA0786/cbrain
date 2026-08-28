@@ -8,6 +8,7 @@ single consumption. Frozen inboxes never approve and never dispatch.
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 from collections.abc import Callable, Collection, Mapping
@@ -72,8 +73,14 @@ class ApprovalInbox:
         self,
         *,
         allowed_approvers: Mapping[ApprovalRole, Collection[str]],
+        max_ttl_seconds: float,
         clock: Callable[[], float] | None = None,
     ) -> None:
+        self._max_ttl_seconds = _require_finite_seconds(
+            max_ttl_seconds, name="max_ttl_seconds"
+        )
+        if self._max_ttl_seconds <= 0:
+            raise ApprovalInboxError("max_ttl_seconds must be positive")
         normalized: dict[ApprovalRole, frozenset[str]] = {}
         for role, actor_ids in allowed_approvers.items():
             if not isinstance(role, ApprovalRole):
@@ -140,8 +147,11 @@ class ApprovalInbox:
             raise ApprovalInboxError("request_id must be non-empty")
         if not isinstance(principal, ApprovalPrincipal):
             raise ApprovalInboxError("principal must come from the identity adapter")
-        if ttl_seconds <= 0:
+        ttl = _require_finite_seconds(ttl_seconds, name="ttl_seconds")
+        if ttl <= 0:
             raise ApprovalInboxError("ttl_seconds must be positive")
+        if ttl > self._max_ttl_seconds:
+            raise ApprovalInboxError("ttl_seconds exceeds deployment maximum")
         with self._lock:
             if self._frozen_reason is not None:
                 raise ApprovalInboxError("inbox is frozen")
@@ -162,18 +172,28 @@ class ApprovalInbox:
                 actor_role=principal.role,
                 intent_digest=pending.intent_digest,
                 approved_at=now,
-                expires_at=now + ttl_seconds,
+                expires_at=now + ttl,
             )
             self._approvals[request_id] = record
             return record
 
-    def consume_if_approved(self, action: ActionIntent, *, digest: str) -> bool:
+    def consume_if_approved(
+        self,
+        action: ActionIntent,
+        *,
+        digest: str,
+        required_role: ApprovalRole,
+    ) -> bool:
+        if not isinstance(required_role, ApprovalRole):
+            raise ApprovalInboxError("required_role must be an ApprovalRole")
         with self._lock:
             if self._frozen_reason is not None:
                 return False
             pending = self._pending.get(action.request_id)
             record = self._approvals.get(action.request_id)
             if pending is None or record is None or record.consumed:
+                return False
+            if pending.required_role is not required_role:
                 return False
             if pending.intent_digest != digest or record.intent_digest != digest:
                 return False
@@ -235,6 +255,7 @@ class ApprovalBoundedGateway:
                 request_id=action.request_id,
                 tool_executed=False,
                 reason=f"inbox_frozen:{self._inbox.frozen_reason}",
+                retryable=False,
             )
             self._inner.last_status = execution.status
             return execution
@@ -249,10 +270,13 @@ class ApprovalBoundedGateway:
                 request_id=action.request_id,
                 tool_executed=False,
                 reason="approval_role_not_configured",
+                retryable=False,
             )
             self._inner.last_status = execution.status
             return execution
-        if self._inbox.consume_if_approved(action, digest=digest):
+        if self._inbox.consume_if_approved(
+            action, digest=digest, required_role=required_role
+        ):
             output = handler(action.arguments)
             self.handler_calls.append(action.tool_name)
             self._inner.handler_calls.append(action.tool_name)
@@ -275,8 +299,27 @@ class ApprovalBoundedGateway:
             )
             self._inner.last_status = execution.status
             return execution
+        if record is not None:
+            execution = GovernedExecution(
+                status=ExecutionStatus.CONTROL_FAILURE,
+                request_id=action.request_id,
+                tool_executed=False,
+                reason="approval_role_mismatch",
+                retryable=False,
+            )
+            self._inner.last_status = execution.status
+            return execution
         self._inbox.park(action, digest=digest, required_role=required_role)
         return first
+
+
+def _require_finite_seconds(value: object, *, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ApprovalInboxError(f"{name} must be a finite number")
+    number = float(value)
+    if math.isnan(number) or math.isinf(number):
+        raise ApprovalInboxError(f"{name} must be a finite number")
+    return number
 
 
 __all__ = [
