@@ -9,6 +9,14 @@ from .durable import (
     profile_fingerprint,
 )
 from .foundation import FoundationAgent, FoundationAgentError
+from .insights import (
+    InsightsEngine,
+    InsightsError,
+    LearningRecorder,
+    PersonalizationError,
+    PersonalizationManager,
+)
+from .insights_store import InMemoryLearningStore, SQLiteLearningStore
 from .limits import RunLimits, finite_positive_seconds
 from .profile import AgentProfile
 from .store_memory import InMemoryRunStore
@@ -21,7 +29,13 @@ __all__ = [
     "FoundationAgent",
     "FoundationAgentError",
     "GovernedTool",
+    "InMemoryLearningStore",
     "InMemoryRunStore",
+    "InsightsEngine",
+    "InsightsError",
+    "LearningRecorder",
+    "PersonalizationError",
+    "PersonalizationManager",
     "RunEvent",
     "RunEventKind",
     "RunInput",
@@ -30,6 +44,7 @@ __all__ = [
     "RunStatus",
     "RunStore",
     "RunStoreError",
+    "SQLiteLearningStore",
     "SQLiteRunStore",
     "StoredRunRecord",
     "ToolRegistry",

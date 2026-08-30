@@ -12,6 +12,7 @@ dependencies = []
 [project.scripts]
 cbrain-eval = "cbrain.evaluation.cli:main"
 cbrain-hermes = "cbrain.hermes_launcher:main"
+cbrain-insights = "cbrain.agent.insights_cli:main"
 
 [project.optional-dependencies]
 dev = [
@@ -52,6 +53,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 python_version = "3.12"
 strict = true
 warn_unused_configs = true
+exclude = "(^cbrain/dashboard)"
 
 [tool.uv.sources]
 privatevault-agent-dna = { path = "../privatevault-agent-dna", editable = true }
