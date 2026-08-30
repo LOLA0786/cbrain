@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-import json
+import os
 import sqlite3
+import tempfile
 import threading
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 from .insights import (
     STORE_SCHEMA_VERSION,
@@ -14,11 +16,14 @@ from .insights import (
     InsightsError,
     LearningSignal,
     LearningStoreError,
+    finalize_signal,
     parse_record_json,
     validate_appended_approval,
     validate_appended_signal,
     validate_approval_columns,
     validate_signal_columns,
+    verify_v1_signal_columns,
+    verify_v1_signal_payload,
 )
 
 _SCHEMA = """
@@ -600,6 +605,51 @@ class ReadOnlyLearningStore:
         return self._inner.load_approvals(approval_ids)
 
 
+_V1_SIGNAL_COLUMNS = (
+    "signal_id",
+    "schema_version",
+    "kind",
+    "agent_id",
+    "content_hash",
+    "observed_at",
+    "idempotency_key",
+    "record_json",
+)
+_V1_ALLOWED_TABLES = frozenset(
+    {"learning_signals", "learning_approvals", "sqlite_sequence"}
+)
+_SQLITE_SIDECAR_SUFFIXES = ("-wal", "-shm", "-journal")
+
+
+def _paths_resolve_same(left: Path, right: Path) -> bool:
+    if left.resolve() == right.resolve():
+        return True
+    if left.exists() and right.exists():
+        try:
+            return os.path.samefile(left, right)
+        except OSError:
+            return False
+    return False
+
+
+def _sidecar_paths(path: Path) -> tuple[Path, ...]:
+    return tuple(Path(str(path) + suffix) for suffix in _SQLITE_SIDECAR_SUFFIXES)
+
+
+def _cleanup_sqlite_artifacts(path: Path) -> None:
+    for candidate in (path, *_sidecar_paths(path)):
+        try:
+            if candidate.exists() or candidate.is_symlink():
+                candidate.unlink()
+        except OSError:
+            continue
+
+
+def _column_names(connection: sqlite3.Connection, table: str) -> tuple[str, ...]:
+    rows = connection.execute(f"PRAGMA table_info({table})").fetchall()
+    return tuple(str(row[1]) for row in rows)
+
+
 def migrate_learning_store_v1_to_v2(
     source: str | Path, destination: str | Path
 ) -> None:
@@ -608,73 +658,140 @@ def migrate_learning_store_v1_to_v2(
     destination_path = Path(destination)
     if not source_path.is_file():
         raise LearningStoreError("learning store does not exist")
-    if destination_path.exists():
+    if _paths_resolve_same(source_path, destination_path):
+        raise LearningStoreError("migration source and destination must differ")
+    if destination_path.exists() or any(
+        sidecar.exists() for sidecar in _sidecar_paths(destination_path)
+    ):
         raise LearningStoreError("migration destination already exists")
-    connection = sqlite3.connect(str(source_path))
+
+    uri = source_path.resolve().as_uri() + "?mode=ro"
+    connection = sqlite3.connect(uri, uri=True)
+    verified: list[dict[str, Any]] = []
     try:
+        connection.execute("PRAGMA query_only = ON")
         version = _read_store_schema_version(connection)
         if version != 1:
             raise LearningStoreError("explicit migration requires a v1 store")
-        signal_rows = connection.execute(
-            """
-            SELECT record_json FROM learning_signals
-            """
-        ).fetchall()
-        approval_rows = []
         tables = _table_names(connection)
+        unexpected = tables - _V1_ALLOWED_TABLES
+        if unexpected:
+            raise LearningStoreError("v1 store schema is invalid")
+        if "learning_signals" not in tables:
+            raise LearningStoreError("explicit migration requires a v1 store")
+        if _column_names(connection, "learning_signals") != _V1_SIGNAL_COLUMNS:
+            raise LearningStoreError("v1 store schema is invalid")
+        approval_rows: list[tuple[object, ...]] = []
         if "learning_approvals" in tables:
             approval_rows = connection.execute(
                 "SELECT record_json FROM learning_approvals"
             ).fetchall()
+        if approval_rows:
+            raise LearningStoreError(
+                "v1 approvals cannot be silently reinterpreted; "
+                "re-approve after signal migration"
+            )
+        signal_rows = connection.execute(
+            """
+            SELECT signal_id, schema_version, kind, agent_id, content_hash,
+                   observed_at, idempotency_key, record_json
+            FROM learning_signals
+            """
+        ).fetchall()
+        for (
+            signal_id,
+            schema_version,
+            kind,
+            agent_id,
+            content_hash,
+            observed_at,
+            idempotency_key,
+            raw,
+        ) in signal_rows:
+            if not isinstance(raw, str):
+                raise LearningStoreError("v1 signal is not verifiable")
+            try:
+                payload = parse_record_json(raw)
+                fields = verify_v1_signal_payload(payload, raw)
+                verify_v1_signal_columns(
+                    payload,
+                    signal_id=signal_id,
+                    schema_version=schema_version,
+                    kind=kind,
+                    agent_id=agent_id,
+                    content_hash=content_hash,
+                    observed_at=observed_at,
+                    idempotency_key=idempotency_key,
+                )
+            except InsightsError as exc:
+                raise LearningStoreError("v1 signal is not verifiable") from exc
+            verified.append(fields)
     finally:
         connection.close()
-    if approval_rows:
-        raise LearningStoreError(
-            "v1 approvals cannot be silently reinterpreted; "
-            "re-approve after signal migration"
-        )
-    upgraded = SQLiteLearningStore(destination_path)
-    try:
-        for (raw,) in signal_rows:
-            if not isinstance(raw, str):
-                raise LearningStoreError("stored learning signal is corrupted")
-            try:
-                payload = json.loads(raw)
-            except json.JSONDecodeError as exc:
-                raise LearningStoreError("v1 signal payload is invalid") from exc
-            if not isinstance(payload, dict) or payload.get("schema_version") != 1:
-                raise LearningStoreError("v1 signal payload is invalid")
-            from .insights import (
-                SignalKind,
-                finalize_signal,
-                parse_execution_status,
-                parse_run_status,
-            )
 
-            upgraded.append_signal(
-                finalize_signal(
-                    kind=SignalKind(str(payload["kind"])),
-                    agent_id=str(payload["agent_id"]),
-                    idempotency_key=str(payload["idempotency_key"]),
-                    observed_at=float(payload["observed_at"]),
-                    reviewer_id=payload.get("reviewer_id"),
-                    feedback_text=payload.get("feedback_text"),
-                    run_id=payload.get("run_id"),
-                    run_status=(
-                        None
-                        if payload.get("run_status") is None
-                        else parse_run_status(payload.get("run_status"))
-                    ),
-                    tool_name=payload.get("tool_name"),
-                    execution_status=(
-                        None
-                        if payload.get("execution_status") is None
-                        else parse_execution_status(payload.get("execution_status"))
-                    ),
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    handle, tmp_name = tempfile.mkstemp(
+        prefix=f".{destination_path.name}.migrate-",
+        suffix=".db",
+        dir=destination_path.parent,
+    )
+    os.close(handle)
+    tmp_path = Path(tmp_name)
+    published = False
+    try:
+        upgraded = SQLiteLearningStore(tmp_path)
+        try:
+            for fields in verified:
+                upgraded.append_signal(
+                    finalize_signal(
+                        kind=fields["kind"],
+                        agent_id=fields["agent_id"],
+                        idempotency_key=fields["idempotency_key"],
+                        observed_at=fields["observed_at"],
+                        reviewer_id=fields["reviewer_id"],
+                        feedback_text=fields["feedback_text"],
+                        run_id=fields["run_id"],
+                        run_status=fields["run_status"],
+                        tool_name=fields["tool_name"],
+                        execution_status=fields["execution_status"],
+                    )
                 )
-            )
-    finally:
-        upgraded.close()
+        finally:
+            upgraded.close()
+        check = SQLiteLearningStore(tmp_path)
+        try:
+            loaded = check.list_signals()
+            if len(loaded) != len(verified):
+                raise LearningStoreError("migrated store failed verification")
+            by_key = {item.idempotency_key: item for item in loaded}
+            for fields in verified:
+                signal = by_key.get(str(fields["idempotency_key"]))
+                if signal is None:
+                    raise LearningStoreError("migrated store failed verification")
+                validate_appended_signal(signal)
+                if (
+                    signal.schema_version != STORE_SCHEMA_VERSION
+                    or signal.kind != fields["kind"]
+                    or signal.agent_id != fields["agent_id"]
+                    or signal.feedback_text != fields["feedback_text"]
+                    or signal.reviewer_id != fields["reviewer_id"]
+                    or signal.run_id != fields["run_id"]
+                    or signal.run_status != fields["run_status"]
+                    or signal.tool_name != fields["tool_name"]
+                    or signal.execution_status != fields["execution_status"]
+                    or signal.observed_at != fields["observed_at"]
+                ):
+                    raise LearningStoreError("migrated store failed verification")
+        finally:
+            check.close()
+        os.replace(tmp_path, destination_path)
+        published = True
+    except Exception:
+        _cleanup_sqlite_artifacts(tmp_path)
+        if not published:
+            _cleanup_sqlite_artifacts(destination_path)
+        raise
+    _cleanup_sqlite_artifacts(tmp_path)
 
 
 __all__ = [

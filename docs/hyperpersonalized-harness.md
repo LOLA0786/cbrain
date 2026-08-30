@@ -42,6 +42,13 @@ Only explicit human feedback can become a rule or skill candidate. Runtime
 failures and tool rejections may identify friction. They never become
 instructions automatically.
 
+A repeated-evidence group is valid only when it has at least
+`MIN_GUIDANCE_OCCURRENCES` unique human signals, unique evidence IDs,
+exactly one human `SignalKind`, exactly one agent ID, and exactly one
+normalized feedback value. Candidate generation, approval reconstruction,
+and compile-time revalidation share that validator. Mixed or incomplete
+groups fail closed and are never filtered into a weaker subset.
+
 Ingest rejects credential-shaped text (private keys, API keys, JWTs,
 password/secret/token assignments, bearer tokens). Status fields accept only
 defined `RunStatus` and `ExecutionStatus` values.
@@ -88,8 +95,14 @@ and accepts it only when the semantic digest matches.
 
 The on-disk schema version is `2`. Opening a v1 store fails closed and
 never silently reinterprets old hashes. Operators who need a rewrite must
-call `migrate_learning_store_v1_to_v2` explicitly; v1 approvals are not
-migrated and must be re-approved.
+call `migrate_learning_store_v1_to_v2` explicitly. That rewrite opens the
+source read-only, verifies every v1 row against the exact legacy schema,
+canonical JSON, key allowlist, types, column/payload match, and the
+original v1 hash contract (semantic fields excluding timestamps), then
+writes a temporary v2 store, reopens it, and publishes only by atomic
+rename. Any failure leaves the source byte-identical and publishes no
+destination database or SQLite sidecar. v1 approvals are not migrated
+and must be re-approved. Unverified legacy rows are never rewritten.
 
 Evidence is loaded by exact IDs; missing IDs fail closed.
 
@@ -156,8 +169,12 @@ cbrain-insights report --store PATH [--agent-id ID] [--days 30] \
 to the last 30 days. Reporting a missing store returns exit code 2 and
 creates no file. An existing store is opened with a read-only / query-only
 connection; report mode never creates schema, migrates, or sets WAL. Day
-and occurrence values must be positive. HTML escapes visible text and
-safely encodes embedded JSON. No command approves or activates guidance.
+and occurrence values must be positive. `--output` is rejected with exit
+code 2 when it resolves to the store, a symlink or hardlink alias, a
+SQLite sidecar (`-wal`, `-shm`, `-journal`), or a directory. Permitted
+files are rendered in memory and replaced atomically. HTML escapes visible
+text and safely encodes embedded JSON. No command approves or activates
+guidance.
 
 ## Foundation agent integration
 
