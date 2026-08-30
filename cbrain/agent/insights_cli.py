@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import os
 import sys
+import tempfile
 import time
 from collections.abc import Sequence
 from pathlib import Path
@@ -21,6 +24,9 @@ from .insights import (
     render_report_json,
 )
 from .insights_store import ReadOnlyLearningStore, SQLiteLearningStore
+
+_SQLITE_SIDECAR_SUFFIXES = ("-wal", "-shm", "-journal")
+_UNSAFE_OUTPUT = "report output path is unsafe"
 
 
 def main(arguments: Sequence[str] | None = None) -> int:
@@ -93,12 +99,79 @@ def _write_feedback(parsed: argparse.Namespace) -> int:
     return 0
 
 
+def _protected_store_paths(store: Path) -> frozenset[Path]:
+    resolved = store.resolve()
+    return frozenset(
+        {
+            resolved,
+            *(Path(str(resolved) + suffix) for suffix in _SQLITE_SIDECAR_SUFFIXES),
+        }
+    )
+
+
+def _same_existing_file(left: Path, right: Path) -> bool:
+    if not left.exists() or not right.exists():
+        return False
+    try:
+        return os.path.samefile(left, right)
+    except OSError:
+        return False
+
+
+def reject_unsafe_report_output(store: Path, output: Path) -> None:
+    if output.exists() and (output.is_dir() or output.is_symlink() and output.is_dir()):
+        raise LearningStoreError(_UNSAFE_OUTPUT)
+    try:
+        output_resolved = output.resolve()
+    except OSError as exc:
+        raise LearningStoreError(_UNSAFE_OUTPUT) from exc
+    if output_resolved.exists() and output_resolved.is_dir():
+        raise LearningStoreError(_UNSAFE_OUTPUT)
+    protected = _protected_store_paths(store)
+    if output_resolved in protected:
+        raise LearningStoreError(_UNSAFE_OUTPUT)
+    if any(_same_existing_file(output, path) for path in protected):
+        raise LearningStoreError(_UNSAFE_OUTPUT)
+    if store.exists() and _same_existing_file(output, store):
+        raise LearningStoreError(_UNSAFE_OUTPUT)
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    directory = path.parent
+    if not directory.exists() or not directory.is_dir():
+        raise LearningStoreError(_UNSAFE_OUTPUT)
+    if path.exists() and path.is_dir():
+        raise LearningStoreError(_UNSAFE_OUTPUT)
+    handle, tmp_name = tempfile.mkstemp(
+        prefix=".insights-report-",
+        dir=str(directory),
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as writer:
+            writer.write(content)
+            writer.flush()
+            os.fsync(writer.fileno())
+        os.replace(tmp_path, path)
+    except OSError as exc:
+        with contextlib.suppress(OSError):
+            tmp_path.unlink()
+        raise LearningStoreError(_UNSAFE_OUTPUT) from exc
+    except Exception:
+        with contextlib.suppress(OSError):
+            tmp_path.unlink()
+        raise
+
+
 def _write_report(parsed: argparse.Namespace) -> int:
     days = positive_int(parsed.days, "days")
     min_occurrences = positive_int(parsed.min_occurrences, "min-occurrences")
     store_path = Path(parsed.store)
     if not store_path.is_file():
         raise LearningStoreError("learning store does not exist")
+    output_path = Path(parsed.output) if parsed.output else None
+    if output_path is not None:
+        reject_unsafe_report_output(store_path, output_path)
     store = SQLiteLearningStore.open_readonly(store_path)
     try:
         report = build_report(
@@ -114,8 +187,8 @@ def _write_report(parsed: argparse.Namespace) -> int:
         )
     finally:
         store.close()
-    if parsed.output:
-        Path(parsed.output).write_text(rendered, encoding="utf-8")
+    if output_path is not None:
+        _atomic_write_text(output_path, rendered)
     else:
         sys.stdout.write(rendered)
     return 0

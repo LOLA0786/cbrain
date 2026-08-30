@@ -26,6 +26,7 @@ from .durable import profile_fingerprint
 from .profile import AgentProfile
 
 SIGNAL_SCHEMA_VERSION = 2
+V1_SIGNAL_SCHEMA_VERSION = 1
 APPROVAL_SCHEMA_VERSION = 2
 STORE_SCHEMA_VERSION = 2
 REPORT_SCHEMA = "cbrain-insights-report/v1"
@@ -167,6 +168,49 @@ def normalize_feedback(text: str) -> str:
     return " ".join(text.split()).casefold()
 
 
+def require_homogeneous_human_group(
+    signals: Sequence[LearningSignal],
+) -> tuple[LearningSignal, ...]:
+    if not signals:
+        raise InsightsError("human evidence group is empty")
+    ordered = tuple(
+        sorted(signals, key=lambda item: (item.observed_at, item.signal_id))
+    )
+    seen_ids: set[str] = set()
+    kinds: set[SignalKind] = set()
+    agents: set[str] = set()
+    feedbacks: set[str] = set()
+    for signal in ordered:
+        if not isinstance(signal, LearningSignal):
+            raise InsightsError("human evidence group contains an invalid signal")
+        if signal.kind not in _HUMAN_SIGNAL_KINDS:
+            raise InsightsError("human evidence group contains non-human signals")
+        if signal.kind in (
+            SignalKind.STRUCTURAL_RUN_OUTCOME,
+            SignalKind.GOVERNED_TOOL_REJECTION,
+        ):
+            raise InsightsError("human evidence group contains runtime signals")
+        if signal.signal_id in seen_ids:
+            raise InsightsError("human evidence group has duplicate evidence ids")
+        seen_ids.add(signal.signal_id)
+        kinds.add(signal.kind)
+        agents.add(signal.agent_id)
+        if signal.feedback_text is None:
+            raise InsightsError("human evidence group requires feedback text")
+        feedbacks.add(normalize_feedback(signal.feedback_text))
+    if len(seen_ids) < MIN_GUIDANCE_OCCURRENCES:
+        raise InsightsError("human evidence group has insufficient unique occurrences")
+    if len(kinds) != 1:
+        raise InsightsError("human evidence group must have exactly one signal kind")
+    if len(agents) != 1:
+        raise InsightsError("human evidence group must have exactly one agent")
+    if len(feedbacks) != 1:
+        raise InsightsError("human evidence group must have exactly one feedback value")
+    if len(seen_ids) != len(ordered):
+        raise InsightsError("human evidence group has duplicate evidence ids")
+    return ordered
+
+
 def reject_credential_shaped(text: str) -> None:
     for pattern in _CREDENTIAL_PATTERNS:
         if pattern.search(text):
@@ -210,6 +254,23 @@ def parse_human_feedback_kind(value: object) -> HumanFeedbackKind:
         ) from exc
 
 
+V1_SIGNAL_RECORD_KEYS = frozenset(
+    {
+        "schema_version",
+        "signal_id",
+        "kind",
+        "agent_id",
+        "idempotency_key",
+        "observed_at",
+        "content_hash",
+        "reviewer_id",
+        "feedback_text",
+        "run_id",
+        "run_status",
+        "tool_name",
+        "execution_status",
+    }
+)
 SIGNAL_RECORD_KEYS = frozenset(
     {
         "schema_version",
@@ -292,6 +353,141 @@ def _reject_forbidden_keys(payload: Mapping[str, Any]) -> None:
         folded = str(key).casefold()
         if key in FORBIDDEN_SIGNAL_KEYS or folded in FORBIDDEN_SIGNAL_KEYS:
             raise InsightsError(f"forbidden signal field {key!r}")
+
+
+def _require_exact_int(value: object, field_name: str, expected: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value != expected:
+        raise InsightsError(f"{field_name} must be {expected}")
+    return value
+
+
+def _require_exact_text(value: object, field_name: str) -> str:
+    if not isinstance(value, str):
+        raise InsightsError(f"{field_name} must be a string")
+    return require_text(value, field_name)
+
+
+def _optional_exact_text(value: object, field_name: str) -> str | None:
+    if value is None:
+        return None
+    return _require_exact_text(value, field_name)
+
+
+def v1_signal_legacy_hash(payload: Mapping[str, Any]) -> str:
+    return sha256_hex(
+        {
+            "schema_version": V1_SIGNAL_SCHEMA_VERSION,
+            "kind": payload["kind"],
+            "agent_id": payload["agent_id"],
+            "idempotency_key": payload["idempotency_key"],
+            "reviewer_id": payload["reviewer_id"],
+            "feedback_text": payload["feedback_text"],
+            "run_id": payload["run_id"],
+            "run_status": payload["run_status"],
+            "tool_name": payload["tool_name"],
+            "execution_status": payload["execution_status"],
+        }
+    )
+
+
+def verify_v1_signal_payload(payload: Mapping[str, Any], raw: str) -> dict[str, Any]:
+    require_exact_keys(payload, V1_SIGNAL_RECORD_KEYS)
+    if raw != canonical_json(payload):
+        raise InsightsError("v1 signal JSON is not canonical")
+    _require_exact_int(
+        payload["schema_version"], "schema_version", V1_SIGNAL_SCHEMA_VERSION
+    )
+    kind_value = _require_exact_text(payload["kind"], "kind")
+    try:
+        kind = SignalKind(kind_value)
+    except ValueError as exc:
+        raise InsightsError("v1 kind is not a defined signal kind") from exc
+    agent_id = _require_exact_text(payload["agent_id"], "agent_id")
+    idempotency_key = _require_exact_text(payload["idempotency_key"], "idempotency_key")
+    signal_id = _require_exact_text(payload["signal_id"], "signal_id")
+    content_hash = _require_exact_text(payload["content_hash"], "content_hash")
+    observed_at = finite_timestamp(payload["observed_at"], "observed_at")
+    if observed_at != payload["observed_at"] and not (
+        isinstance(payload["observed_at"], int)
+        and not isinstance(payload["observed_at"], bool)
+        and float(payload["observed_at"]) == observed_at
+    ):
+        raise InsightsError("observed_at must be a finite number")
+    reviewer_id = _optional_exact_text(payload["reviewer_id"], "reviewer_id")
+    if payload["feedback_text"] is None:
+        feedback_text = None
+    elif not isinstance(payload["feedback_text"], str):
+        raise InsightsError("feedback_text must be a string")
+    else:
+        feedback_text = require_text(payload["feedback_text"], "feedback_text")
+        if len(feedback_text) > MAX_FEEDBACK_CHARS:
+            raise InsightsError("feedback_text exceeds max length")
+        reject_credential_shaped(feedback_text)
+    run_id = _optional_exact_text(payload["run_id"], "run_id")
+    tool_name = _optional_exact_text(payload["tool_name"], "tool_name")
+    if payload["run_status"] is None:
+        run_status = None
+    else:
+        run_status = parse_run_status(payload["run_status"])
+    if payload["execution_status"] is None:
+        execution_status = None
+    else:
+        execution_status = parse_execution_status(payload["execution_status"])
+    expected = v1_signal_legacy_hash(payload)
+    if signal_id != expected or content_hash != expected:
+        raise InsightsError("v1 signal hash mismatch")
+    draft = LearningSignal(
+        schema_version=SIGNAL_SCHEMA_VERSION,
+        signal_id="pending",
+        kind=kind,
+        agent_id=agent_id,
+        idempotency_key=idempotency_key,
+        observed_at=observed_at,
+        content_hash="pending",
+        idempotency_digest="pending",
+        reviewer_id=reviewer_id,
+        feedback_text=feedback_text,
+        run_id=run_id,
+        run_status=run_status,
+        tool_name=tool_name,
+        execution_status=execution_status,
+    )
+    _validate_signal_shape(draft)
+    return {
+        "kind": kind,
+        "agent_id": agent_id,
+        "idempotency_key": idempotency_key,
+        "observed_at": observed_at,
+        "reviewer_id": reviewer_id,
+        "feedback_text": feedback_text,
+        "run_id": run_id,
+        "run_status": run_status,
+        "tool_name": tool_name,
+        "execution_status": execution_status,
+    }
+
+
+def verify_v1_signal_columns(
+    payload: Mapping[str, Any],
+    *,
+    signal_id: object,
+    schema_version: object,
+    kind: object,
+    agent_id: object,
+    content_hash: object,
+    observed_at: object,
+    idempotency_key: object,
+) -> None:
+    if (
+        signal_id != payload["signal_id"]
+        or schema_version != payload["schema_version"]
+        or kind != payload["kind"]
+        or agent_id != payload["agent_id"]
+        or content_hash != payload["content_hash"]
+        or observed_at != payload["observed_at"]
+        or idempotency_key != payload["idempotency_key"]
+    ):
+        raise InsightsError("v1 column values do not match record_json")
 
 
 @dataclass(frozen=True, slots=True)
@@ -964,9 +1160,7 @@ def _finding(
 def _candidate_from_human_group(
     signals: Sequence[LearningSignal],
 ) -> GuidanceCandidate:
-    ordered = tuple(
-        sorted(signals, key=lambda item: (item.observed_at, item.signal_id))
-    )
+    ordered = require_homogeneous_human_group(signals)
     first = ordered[0]
     assert first.feedback_text is not None
     kind = first.kind
@@ -1090,7 +1284,10 @@ class InsightsEngine:
             if len(group) < self._min_occurrences:
                 continue
             finding_kind = _FINDING_FOR_HUMAN[kind]
-            candidate = _candidate_from_human_group(group)
+            try:
+                candidate = _candidate_from_human_group(group)
+            except InsightsError as exc:
+                raise InsightsError("human evidence group is not homogeneous") from exc
             findings.append(
                 _finding(
                     kind=finding_kind,
@@ -1402,13 +1599,12 @@ class PersonalizationManager:
             evidence = self._store.load_signals(approval.evidence_ids)
         except LearningStoreError as exc:
             raise PersonalizationError("approval evidence is missing") from exc
-        if any(item.kind not in _HUMAN_SIGNAL_KINDS for item in evidence):
+        try:
+            reconstructed = _candidate_from_human_group(evidence)
+        except InsightsError as exc:
             raise PersonalizationError(
-                "approval evidence is not explicit human feedback"
-            )
-        if len(evidence) < MIN_GUIDANCE_OCCURRENCES:
-            raise PersonalizationError("approval evidence is incomplete")
-        reconstructed = _candidate_from_human_group(evidence)
+                "approval evidence is not a valid human group"
+            ) from exc
         if (
             reconstructed.candidate_hash != approval.candidate_hash
             or reconstructed.body != approval.instruction_text
@@ -1456,11 +1652,12 @@ class PersonalizationManager:
         ):
             raise PersonalizationError("candidate is fabricated, changed, or stale")
         evidence = self._store.load_signals(match.evidence_ids)
-        if any(item.kind not in _HUMAN_SIGNAL_KINDS for item in evidence):
+        try:
+            reconstructed = _candidate_from_human_group(evidence)
+        except InsightsError as exc:
             raise PersonalizationError(
-                "candidate evidence is not explicit human feedback"
-            )
-        reconstructed = _candidate_from_human_group(evidence)
+                "candidate evidence is not a valid human group"
+            ) from exc
         if reconstructed != match:
             raise PersonalizationError("candidate is fabricated, changed, or stale")
         fingerprint = profile_fingerprint(profile)
@@ -1666,6 +1863,8 @@ __all__ = [
     "SECONDS_PER_DAY",
     "SIGNAL_SCHEMA_VERSION",
     "STORE_SCHEMA_VERSION",
+    "V1_SIGNAL_RECORD_KEYS",
+    "V1_SIGNAL_SCHEMA_VERSION",
     "ApprovalRecord",
     "CandidateKind",
     "FindingKind",
@@ -1697,9 +1896,13 @@ __all__ = [
     "reject_credential_shaped",
     "render_report_html",
     "render_report_json",
+    "require_homogeneous_human_group",
     "run_outcome_signal",
     "sha256_hex",
     "tool_rejection_signal",
+    "v1_signal_legacy_hash",
     "validate_approval_columns",
     "validate_signal_columns",
+    "verify_v1_signal_columns",
+    "verify_v1_signal_payload",
 ]
