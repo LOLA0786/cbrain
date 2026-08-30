@@ -67,20 +67,59 @@ hash. The engine never writes approvals or compiled profiles.
 ## Storage
 
 `InMemoryLearningStore` and `SQLiteLearningStore` are append-only. SQLite
-uses WAL mode. Records are immutable and content-addressed. Stored columns
-are revalidated against the serialized payload. Corrupt or inconsistent
-rows fail closed. Idempotent retries may differ only in the observation
-timestamp. Evidence is loaded by exact IDs; missing IDs fail closed.
+uses WAL mode on writable opens. Records are immutable and content-addressed.
+
+Each record has two digests:
+
+- a full record hash, including timestamps, used as `signal_id` /
+  `approval_id` and `content_hash`
+- a semantic idempotency digest that excludes only the permitted retry
+  timestamp
+
+Stores validate records on append and on load. Stored JSON must be the
+canonical serialization of the exact schema-key allowlist. Missing keys,
+unknown keys (including `prompt_text` and `Prompt`), nested extras,
+duplicate JSON keys, and column/payload mismatches fail closed.
+
+Idempotent retries compare semantic digests and return the originally
+stored record. Timestamp edits to an existing row fail integrity checks.
+SQLite appends are conflict-safe: a racing insert reloads the stored row
+and accepts it only when the semantic digest matches.
+
+The on-disk schema version is `2`. Opening a v1 store fails closed and
+never silently reinterprets old hashes. Operators who need a rewrite must
+call `migrate_learning_store_v1_to_v2` explicitly; v1 approvals are not
+migrated and must be re-approved.
+
+Evidence is loaded by exact IDs; missing IDs fail closed.
 
 ## Human approval
 
-`PersonalizationManager` requires a non-empty allowlist. Only those humans
-may approve. Approval:
+`PersonalizationManager` requires a deployment-owned `ReviewerVerifier`.
+If no verifier is configured, construction fails closed. Callers present a
+`ReviewerPrincipal` (reviewer id plus a non-secret attestation). The
+verifier attests identity; the manager then re-checks that the principal
+is still authorized. Test doubles belong only under `tests/`. Authentication
+secrets never enter signals, stored records, logs, or model context.
 
-1. Reconstructs a trusted snapshot from storage.
-2. Reloads the cited human evidence by exact ID.
-3. Recomputes the candidate and rejects fabricated, changed, or stale input.
-4. Binds the approval to the exact base `profile_fingerprint`.
+Approval time comes from an injected trusted wall clock owned by the
+manager. The production `approve()` API does not accept `approved_at`.
+Non-finite clocks and regressions behind already-stored timestamps fail
+closed. Candidate freshness is evaluated at that trusted time.
+
+Approval:
+
+1. Verifies the reviewer principal through the configured port.
+2. Reconstructs a trusted snapshot from storage at the trusted clock.
+3. Reloads the cited human evidence by exact ID.
+4. Recomputes the candidate and rejects fabricated, changed, or stale input.
+5. Binds the approval to the exact base `profile_fingerprint`.
+
+`compile_profile()` never trusts an approval merely because it is present
+and hash-consistent. Every stored approval for the agent is revalidated
+(reviewer still authorized, evidence still present and human, candidate
+reconstructs, agent id matches) before any instruction text is appended.
+Invalid approval data fails closed instead of being skipped.
 
 Approvals are immutable and retry-idempotent. Caller-supplied snapshot
 objects are never trusted as source data.
@@ -114,9 +153,11 @@ cbrain-insights report --store PATH [--agent-id ID] [--days 30] \
 ```
 
 `feedback` records sanitized human input. `report` is read-only and defaults
-to the last 30 days. Day and occurrence values must be positive. HTML
-escapes visible text and safely encodes embedded JSON. No command approves
-or activates guidance.
+to the last 30 days. Reporting a missing store returns exit code 2 and
+creates no file. An existing store is opened with a read-only / query-only
+connection; report mode never creates schema, migrates, or sets WAL. Day
+and occurrence values must be positive. HTML escapes visible text and
+safely encodes embedded JSON. No command approves or activates guidance.
 
 ## Foundation agent integration
 

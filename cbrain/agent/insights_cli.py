@@ -96,7 +96,10 @@ def _write_feedback(parsed: argparse.Namespace) -> int:
 def _write_report(parsed: argparse.Namespace) -> int:
     days = positive_int(parsed.days, "days")
     min_occurrences = positive_int(parsed.min_occurrences, "min-occurrences")
-    store = SQLiteLearningStore(parsed.store)
+    store_path = Path(parsed.store)
+    if not store_path.is_file():
+        raise LearningStoreError("learning store does not exist")
+    store = SQLiteLearningStore.open_readonly(store_path)
     try:
         report = build_report(
             ReadOnlyLearningStore(store),
