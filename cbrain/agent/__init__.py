@@ -15,6 +15,7 @@ from .insights import (
     LearningRecorder,
     PersonalizationError,
     PersonalizationManager,
+    ReviewerPrincipal,
 )
 from .insights_store import InMemoryLearningStore, SQLiteLearningStore
 from .limits import RunLimits, finite_positive_seconds
@@ -36,6 +37,7 @@ __all__ = [
     "LearningRecorder",
     "PersonalizationError",
     "PersonalizationManager",
+    "ReviewerPrincipal",
     "RunEvent",
     "RunEventKind",
     "RunInput",

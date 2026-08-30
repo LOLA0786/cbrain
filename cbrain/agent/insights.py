@@ -14,7 +14,7 @@ import math
 import re
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, Protocol
@@ -25,8 +25,9 @@ from .contracts import RunEventKind, RunResult, RunStatus
 from .durable import profile_fingerprint
 from .profile import AgentProfile
 
-SIGNAL_SCHEMA_VERSION = 1
-APPROVAL_SCHEMA_VERSION = 1
+SIGNAL_SCHEMA_VERSION = 2
+APPROVAL_SCHEMA_VERSION = 2
+STORE_SCHEMA_VERSION = 2
 REPORT_SCHEMA = "cbrain-insights-report/v1"
 DEFAULT_WINDOW_DAYS = 30
 MIN_GUIDANCE_OCCURRENCES = 2
@@ -209,9 +210,87 @@ def parse_human_feedback_kind(value: object) -> HumanFeedbackKind:
         ) from exc
 
 
+SIGNAL_RECORD_KEYS = frozenset(
+    {
+        "schema_version",
+        "signal_id",
+        "kind",
+        "agent_id",
+        "idempotency_key",
+        "observed_at",
+        "content_hash",
+        "idempotency_digest",
+        "reviewer_id",
+        "feedback_text",
+        "run_id",
+        "run_status",
+        "tool_name",
+        "execution_status",
+    }
+)
+APPROVAL_RECORD_KEYS = frozenset(
+    {
+        "schema_version",
+        "approval_id",
+        "candidate_hash",
+        "candidate_kind",
+        "agent_id",
+        "reviewer_id",
+        "reviewer_attestation",
+        "profile_fingerprint",
+        "instruction_text",
+        "skill_id",
+        "evidence_ids",
+        "approved_at",
+        "content_hash",
+        "idempotency_digest",
+        "idempotency_key",
+    }
+)
+
+
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    seen: set[str] = set()
+    payload: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in seen:
+            raise InsightsError("duplicate JSON key")
+        seen.add(key)
+        payload[key] = value
+    return payload
+
+
+def parse_record_json(raw: str) -> dict[str, Any]:
+    try:
+        payload, index = json.JSONDecoder(
+            object_pairs_hook=_reject_duplicate_keys
+        ).raw_decode(raw)
+    except json.JSONDecodeError as exc:
+        raise InsightsError("learning record is not valid JSON") from exc
+    if index != len(raw):
+        raise InsightsError("learning record JSON has trailing content")
+    if not isinstance(payload, dict):
+        raise InsightsError("learning record must be a JSON object")
+    return payload
+
+
+def require_exact_keys(payload: Mapping[str, Any], allowed: frozenset[str]) -> None:
+    actual = frozenset(payload)
+    if actual != allowed:
+        raise InsightsError("learning record keys are invalid")
+    folded = [str(key).casefold() for key in payload]
+    if len(folded) != len(set(folded)):
+        raise InsightsError("learning record keys are invalid")
+    allowed_folded = {key.casefold() for key in allowed}
+    if any(str(key).casefold() not in allowed_folded for key in payload):
+        raise InsightsError("learning record keys are invalid")
+    _reject_forbidden_keys(payload)
+
+
 def _reject_forbidden_keys(payload: Mapping[str, Any]) -> None:
     for key in payload:
-        if key in FORBIDDEN_SIGNAL_KEYS:
+        folded = str(key).casefold()
+        if key in FORBIDDEN_SIGNAL_KEYS or folded in FORBIDDEN_SIGNAL_KEYS:
             raise InsightsError(f"forbidden signal field {key!r}")
 
 
@@ -224,6 +303,7 @@ class LearningSignal:
     idempotency_key: str
     observed_at: float
     content_hash: str
+    idempotency_digest: str
     reviewer_id: str | None = None
     feedback_text: str | None = None
     run_id: str | None = None
@@ -240,6 +320,7 @@ class LearningSignal:
             "idempotency_key": self.idempotency_key,
             "observed_at": self.observed_at,
             "content_hash": self.content_hash,
+            "idempotency_digest": self.idempotency_digest,
             "reviewer_id": self.reviewer_id,
             "feedback_text": self.feedback_text,
             "run_id": self.run_id,
@@ -249,7 +330,7 @@ class LearningSignal:
                 None if self.execution_status is None else self.execution_status.value
             ),
         }
-        _reject_forbidden_keys(payload)
+        require_exact_keys(payload, SIGNAL_RECORD_KEYS)
         return MappingProxyType(payload)
 
     def to_json(self) -> str:
@@ -259,7 +340,7 @@ class LearningSignal:
     def from_mapping(cls, payload: Mapping[str, Any]) -> LearningSignal:
         if not isinstance(payload, Mapping):
             raise InsightsError("learning signal must be an object")
-        _reject_forbidden_keys(payload)
+        require_exact_keys(payload, SIGNAL_RECORD_KEYS)
         try:
             kind = SignalKind(payload["kind"])
         except (KeyError, ValueError) as exc:
@@ -280,6 +361,9 @@ class LearningSignal:
             ),
             observed_at=finite_timestamp(payload.get("observed_at"), "observed_at"),
             content_hash=require_text(payload.get("content_hash"), "content_hash"),
+            idempotency_digest=require_text(
+                payload.get("idempotency_digest"), "idempotency_digest"
+            ),
             reviewer_id=_optional_text(payload.get("reviewer_id"), "reviewer_id"),
             feedback_text=feedback_raw,
             run_id=_optional_text(payload.get("run_id"), "run_id"),
@@ -295,21 +379,24 @@ class LearningSignal:
                 else parse_execution_status(payload.get("execution_status"))
             ),
         )
-        expected = _signal_content_hash(signal)
-        if signal.content_hash != expected or signal.signal_id != expected:
+        expected_semantic = _signal_idempotency_digest(signal)
+        expected_record = _signal_record_hash(signal)
+        if (
+            signal.idempotency_digest != expected_semantic
+            or signal.content_hash != expected_record
+            or signal.signal_id != expected_record
+        ):
             raise InsightsError("learning signal content hash mismatch")
         _validate_signal_shape(signal)
         return signal
 
     @classmethod
     def from_json(cls, raw: str) -> LearningSignal:
-        try:
-            payload = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise InsightsError("learning signal is not valid JSON") from exc
-        if not isinstance(payload, dict):
-            raise InsightsError("learning signal must be a JSON object")
-        return cls.from_mapping(payload)
+        payload = parse_record_json(raw)
+        signal = cls.from_mapping(payload)
+        if raw != signal.to_json():
+            raise InsightsError("learning signal JSON is not canonical")
+        return signal
 
 
 def _optional_text(value: object, field_name: str) -> str | None:
@@ -318,7 +405,7 @@ def _optional_text(value: object, field_name: str) -> str | None:
     return require_text(value, field_name)
 
 
-def _signal_identity_payload(signal: LearningSignal) -> dict[str, Any]:
+def _signal_semantic_payload(signal: LearningSignal) -> dict[str, Any]:
     return {
         "schema_version": signal.schema_version,
         "kind": signal.kind.value,
@@ -335,8 +422,19 @@ def _signal_identity_payload(signal: LearningSignal) -> dict[str, Any]:
     }
 
 
-def _signal_content_hash(signal: LearningSignal) -> str:
-    return sha256_hex(_signal_identity_payload(signal))
+def _signal_idempotency_digest(signal: LearningSignal) -> str:
+    return sha256_hex(_signal_semantic_payload(signal))
+
+
+def _signal_record_payload(signal: LearningSignal) -> dict[str, Any]:
+    payload = _signal_semantic_payload(signal)
+    payload["observed_at"] = signal.observed_at
+    payload["idempotency_digest"] = signal.idempotency_digest
+    return payload
+
+
+def _signal_record_hash(signal: LearningSignal) -> str:
+    return sha256_hex(_signal_record_payload(signal))
 
 
 def _validate_signal_shape(signal: LearningSignal) -> None:
@@ -398,6 +496,7 @@ def finalize_signal(
         idempotency_key=require_text(idempotency_key, "idempotency_key"),
         observed_at=finite_timestamp(observed_at, "observed_at"),
         content_hash="pending",
+        idempotency_digest="pending",
         reviewer_id=_optional_text(reviewer_id, "reviewer_id"),
         feedback_text=feedback_text,
         run_id=_optional_text(run_id, "run_id"),
@@ -410,38 +509,12 @@ def finalize_signal(
         if len(text) > MAX_FEEDBACK_CHARS:
             raise InsightsError("feedback_text exceeds max length")
         reject_credential_shaped(text)
-        draft = LearningSignal(
-            schema_version=draft.schema_version,
-            signal_id=draft.signal_id,
-            kind=draft.kind,
-            agent_id=draft.agent_id,
-            idempotency_key=draft.idempotency_key,
-            observed_at=draft.observed_at,
-            content_hash=draft.content_hash,
-            reviewer_id=draft.reviewer_id,
-            feedback_text=text,
-            run_id=draft.run_id,
-            run_status=draft.run_status,
-            tool_name=draft.tool_name,
-            execution_status=draft.execution_status,
-        )
+        draft = replace(draft, feedback_text=text)
     _validate_signal_shape(draft)
-    digest = _signal_content_hash(draft)
-    return LearningSignal(
-        schema_version=draft.schema_version,
-        signal_id=digest,
-        kind=draft.kind,
-        agent_id=draft.agent_id,
-        idempotency_key=draft.idempotency_key,
-        observed_at=draft.observed_at,
-        content_hash=digest,
-        reviewer_id=draft.reviewer_id,
-        feedback_text=draft.feedback_text,
-        run_id=draft.run_id,
-        run_status=draft.run_status,
-        tool_name=draft.tool_name,
-        execution_status=draft.execution_status,
-    )
+    semantic = _signal_idempotency_digest(draft)
+    hashed = replace(draft, idempotency_digest=semantic)
+    record_hash = _signal_record_hash(hashed)
+    return replace(hashed, signal_id=record_hash, content_hash=record_hash)
 
 
 def human_signal(
@@ -596,12 +669,14 @@ class ApprovalRecord:
     candidate_kind: CandidateKind
     agent_id: str
     reviewer_id: str
+    reviewer_attestation: str
     profile_fingerprint: str
     instruction_text: str
     skill_id: str | None
     evidence_ids: tuple[str, ...]
     approved_at: float
     content_hash: str
+    idempotency_digest: str
     idempotency_key: str
 
     def to_mapping(self) -> Mapping[str, Any]:
@@ -612,15 +687,17 @@ class ApprovalRecord:
             "candidate_kind": self.candidate_kind.value,
             "agent_id": self.agent_id,
             "reviewer_id": self.reviewer_id,
+            "reviewer_attestation": self.reviewer_attestation,
             "profile_fingerprint": self.profile_fingerprint,
             "instruction_text": self.instruction_text,
             "skill_id": self.skill_id,
             "evidence_ids": list(self.evidence_ids),
             "approved_at": self.approved_at,
             "content_hash": self.content_hash,
+            "idempotency_digest": self.idempotency_digest,
             "idempotency_key": self.idempotency_key,
         }
-        _reject_forbidden_keys(payload)
+        require_exact_keys(payload, APPROVAL_RECORD_KEYS)
         return MappingProxyType(payload)
 
     def to_json(self) -> str:
@@ -630,7 +707,7 @@ class ApprovalRecord:
     def from_mapping(cls, payload: Mapping[str, Any]) -> ApprovalRecord:
         if not isinstance(payload, Mapping):
             raise InsightsError("approval record must be an object")
-        _reject_forbidden_keys(payload)
+        require_exact_keys(payload, APPROVAL_RECORD_KEYS)
         try:
             candidate_kind = CandidateKind(payload["candidate_kind"])
         except (KeyError, ValueError) as exc:
@@ -652,6 +729,9 @@ class ApprovalRecord:
             candidate_kind=candidate_kind,
             agent_id=require_text(payload.get("agent_id"), "agent_id"),
             reviewer_id=require_text(payload.get("reviewer_id"), "reviewer_id"),
+            reviewer_attestation=require_text(
+                payload.get("reviewer_attestation"), "reviewer_attestation"
+            ),
             profile_fingerprint=require_text(
                 payload.get("profile_fingerprint"), "profile_fingerprint"
             ),
@@ -662,34 +742,41 @@ class ApprovalRecord:
             evidence_ids=tuple(evidence_raw),
             approved_at=finite_timestamp(payload.get("approved_at"), "approved_at"),
             content_hash=require_text(payload.get("content_hash"), "content_hash"),
+            idempotency_digest=require_text(
+                payload.get("idempotency_digest"), "idempotency_digest"
+            ),
             idempotency_key=require_text(
                 payload.get("idempotency_key"), "idempotency_key"
             ),
         )
-        expected = _approval_content_hash(record)
-        if record.content_hash != expected or record.approval_id != expected:
+        expected_semantic = _approval_idempotency_digest(record)
+        expected_record = _approval_record_hash(record)
+        if (
+            record.idempotency_digest != expected_semantic
+            or record.content_hash != expected_record
+            or record.approval_id != expected_record
+        ):
             raise InsightsError("approval content hash mismatch")
         _validate_approval(record)
         return record
 
     @classmethod
     def from_json(cls, raw: str) -> ApprovalRecord:
-        try:
-            payload = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise InsightsError("approval record is not valid JSON") from exc
-        if not isinstance(payload, dict):
-            raise InsightsError("approval record must be a JSON object")
-        return cls.from_mapping(payload)
+        payload = parse_record_json(raw)
+        record = cls.from_mapping(payload)
+        if raw != record.to_json():
+            raise InsightsError("approval record JSON is not canonical")
+        return record
 
 
-def _approval_identity_payload(record: ApprovalRecord) -> dict[str, Any]:
+def _approval_semantic_payload(record: ApprovalRecord) -> dict[str, Any]:
     return {
         "schema_version": record.schema_version,
         "candidate_hash": record.candidate_hash,
         "candidate_kind": record.candidate_kind.value,
         "agent_id": record.agent_id,
         "reviewer_id": record.reviewer_id,
+        "reviewer_attestation": record.reviewer_attestation,
         "profile_fingerprint": record.profile_fingerprint,
         "instruction_text": record.instruction_text,
         "skill_id": record.skill_id,
@@ -698,8 +785,19 @@ def _approval_identity_payload(record: ApprovalRecord) -> dict[str, Any]:
     }
 
 
-def _approval_content_hash(record: ApprovalRecord) -> str:
-    return sha256_hex(_approval_identity_payload(record))
+def _approval_idempotency_digest(record: ApprovalRecord) -> str:
+    return sha256_hex(_approval_semantic_payload(record))
+
+
+def _approval_record_payload(record: ApprovalRecord) -> dict[str, Any]:
+    payload = _approval_semantic_payload(record)
+    payload["approved_at"] = record.approved_at
+    payload["idempotency_digest"] = record.idempotency_digest
+    return payload
+
+
+def _approval_record_hash(record: ApprovalRecord) -> str:
+    return sha256_hex(_approval_record_payload(record))
 
 
 def _validate_approval(record: ApprovalRecord) -> None:
@@ -709,9 +807,12 @@ def _validate_approval(record: ApprovalRecord) -> None:
     require_text(record.candidate_hash, "candidate_hash")
     require_text(record.agent_id, "agent_id")
     require_text(record.reviewer_id, "reviewer_id")
+    require_text(record.reviewer_attestation, "reviewer_attestation")
+    reject_credential_shaped(record.reviewer_attestation)
     require_text(record.profile_fingerprint, "profile_fingerprint")
     require_text(record.instruction_text, "instruction_text")
     require_text(record.content_hash, "content_hash")
+    require_text(record.idempotency_digest, "idempotency_digest")
     require_text(record.idempotency_key, "idempotency_key")
     finite_timestamp(record.approved_at, "approved_at")
     if record.candidate_kind is CandidateKind.SKILL:
@@ -763,6 +864,7 @@ def validate_signal_columns(
     content_hash: str,
     observed_at: float,
     idempotency_key: str,
+    idempotency_digest: str,
 ) -> None:
     if signal.schema_version != schema_version:
         raise LearningStoreError("schema_version column mismatch")
@@ -776,6 +878,12 @@ def validate_signal_columns(
         raise LearningStoreError("observed_at column mismatch")
     if signal.idempotency_key != idempotency_key:
         raise LearningStoreError("idempotency_key column mismatch")
+    if signal.idempotency_digest != idempotency_digest:
+        raise LearningStoreError("idempotency_digest column mismatch")
+    if signal.idempotency_digest != _signal_idempotency_digest(signal):
+        raise LearningStoreError("idempotency_digest mismatch")
+    if signal.content_hash != _signal_record_hash(signal):
+        raise LearningStoreError("content_hash column mismatch")
 
 
 def validate_approval_columns(
@@ -788,6 +896,7 @@ def validate_approval_columns(
     content_hash: str,
     approved_at: float,
     idempotency_key: str,
+    idempotency_digest: str,
 ) -> None:
     if approval.schema_version != schema_version:
         raise LearningStoreError("schema_version column mismatch")
@@ -803,6 +912,12 @@ def validate_approval_columns(
         raise LearningStoreError("approved_at column mismatch")
     if approval.idempotency_key != idempotency_key:
         raise LearningStoreError("idempotency_key column mismatch")
+    if approval.idempotency_digest != idempotency_digest:
+        raise LearningStoreError("idempotency_digest column mismatch")
+    if approval.idempotency_digest != _approval_idempotency_digest(approval):
+        raise LearningStoreError("idempotency_digest mismatch")
+    if approval.content_hash != _approval_record_hash(approval):
+        raise LearningStoreError("content_hash column mismatch")
 
 
 def _in_window(signal: LearningSignal, *, now: float, window_days: int) -> bool:
@@ -1121,15 +1236,40 @@ class LearningRecorder:
             rejection_index += 1
 
 
+@dataclass(frozen=True, slots=True)
+class ReviewerPrincipal:
+    """Verified reviewer identity asserted by a deployment-owned verifier.
+
+    ``attestation`` is a non-secret verification statement. It must never
+    contain credentials, tokens, or private keys.
+    """
+
+    reviewer_id: str
+    attestation: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "reviewer_id", require_text(self.reviewer_id, "reviewer_id")
+        )
+        object.__setattr__(
+            self, "attestation", require_text(self.attestation, "attestation")
+        )
+        reject_credential_shaped(self.attestation)
+
+
+class ReviewerVerifier(Protocol):
+    def verify(self, principal: ReviewerPrincipal) -> ReviewerPrincipal: ...
+
+
 def _finalize_approval(
     *,
     candidate: GuidanceCandidate,
-    reviewer_id: str,
+    reviewer: ReviewerPrincipal,
     profile_fingerprint_value: str,
     approved_at: float,
 ) -> ApprovalRecord:
     idempotency_key = (
-        f"{reviewer_id}:{candidate.candidate_hash}:{profile_fingerprint_value}"
+        f"{reviewer.reviewer_id}:{candidate.candidate_hash}:{profile_fingerprint_value}"
     )
     draft = ApprovalRecord(
         schema_version=APPROVAL_SCHEMA_VERSION,
@@ -1137,33 +1277,43 @@ def _finalize_approval(
         candidate_hash=candidate.candidate_hash,
         candidate_kind=candidate.candidate_kind,
         agent_id=candidate.agent_id,
-        reviewer_id=reviewer_id,
+        reviewer_id=reviewer.reviewer_id,
+        reviewer_attestation=reviewer.attestation,
         profile_fingerprint=profile_fingerprint_value,
         instruction_text=candidate.body,
         skill_id=candidate.skill_id,
         evidence_ids=candidate.evidence_ids,
         approved_at=approved_at,
         content_hash="pending",
+        idempotency_digest="pending",
         idempotency_key=idempotency_key,
     )
-    digest = _approval_content_hash(draft)
-    record = ApprovalRecord(
-        schema_version=draft.schema_version,
-        approval_id=digest,
-        candidate_hash=draft.candidate_hash,
-        candidate_kind=draft.candidate_kind,
-        agent_id=draft.agent_id,
-        reviewer_id=draft.reviewer_id,
-        profile_fingerprint=draft.profile_fingerprint,
-        instruction_text=draft.instruction_text,
-        skill_id=draft.skill_id,
-        evidence_ids=draft.evidence_ids,
-        approved_at=draft.approved_at,
-        content_hash=digest,
-        idempotency_key=draft.idempotency_key,
-    )
+    semantic = _approval_idempotency_digest(draft)
+    hashed = replace(draft, idempotency_digest=semantic)
+    record_hash = _approval_record_hash(hashed)
+    record = replace(hashed, approval_id=record_hash, content_hash=record_hash)
     _validate_approval(record)
     return record
+
+
+def validate_appended_signal(signal: LearningSignal) -> LearningSignal:
+    try:
+        parsed = LearningSignal.from_json(signal.to_json())
+    except InsightsError as exc:
+        raise LearningStoreError("learning signal failed append validation") from exc
+    if parsed != signal:
+        raise LearningStoreError("learning signal failed append validation")
+    return parsed
+
+
+def validate_appended_approval(approval: ApprovalRecord) -> ApprovalRecord:
+    try:
+        parsed = ApprovalRecord.from_json(approval.to_json())
+    except InsightsError as exc:
+        raise LearningStoreError("approval failed append validation") from exc
+    if parsed != approval:
+        raise LearningStoreError("approval failed append validation")
+    return parsed
 
 
 class PersonalizationManager:
@@ -1173,20 +1323,18 @@ class PersonalizationManager:
         self,
         store: LearningStore,
         *,
-        allowed_approvers: frozenset[str],
+        reviewer_verifier: ReviewerVerifier | None = None,
+        clock: Callable[[], float] | None = None,
         engine: InsightsEngine | None = None,
     ) -> None:
-        if not isinstance(allowed_approvers, frozenset) or not allowed_approvers:
-            raise PersonalizationError(
-                "allowed_approvers must be a non-empty frozenset"
-            )
-        cleaned: set[str] = set()
-        for approver in allowed_approvers:
-            if not isinstance(approver, str) or not approver.strip():
-                raise PersonalizationError("approver ids must be non-empty strings")
-            cleaned.add(approver.strip())
+        if reviewer_verifier is None:
+            raise PersonalizationError("reviewer verifier is required")
+        verify = getattr(reviewer_verifier, "verify", None)
+        if not callable(verify):
+            raise PersonalizationError("reviewer verifier is required")
         self._store = store
-        self._allowed_approvers = frozenset(cleaned)
+        self._verifier = reviewer_verifier
+        self._clock = clock or time.time
         self._engine = engine or InsightsEngine()
 
     def trusted_snapshot(
@@ -1212,21 +1360,81 @@ class PersonalizationManager:
             raise PersonalizationError("snapshot is fabricated or stale")
         return trusted
 
+    def _trusted_now(self) -> float:
+        now = finite_timestamp(self._clock(), "approved_at")
+        latest: list[float] = [item.observed_at for item in self._store.list_signals()]
+        latest.extend(item.approved_at for item in self._store.list_approvals())
+        if latest and now < max(latest):
+            raise PersonalizationError("trusted clock regression")
+        return now
+
+    def _verify_reviewer(self, principal: ReviewerPrincipal) -> ReviewerPrincipal:
+        try:
+            verified = self._verifier.verify(principal)
+        except PersonalizationError:
+            raise
+        except Exception as exc:
+            raise PersonalizationError("reviewer verification failed") from exc
+        if not isinstance(verified, ReviewerPrincipal):
+            raise PersonalizationError("reviewer verification failed")
+        if (
+            verified.reviewer_id != principal.reviewer_id
+            or verified.attestation != principal.attestation
+        ):
+            raise PersonalizationError("reviewer verification failed")
+        return verified
+
+    def _revalidate_approval(
+        self,
+        approval: ApprovalRecord,
+        *,
+        profile: AgentProfile,
+    ) -> GuidanceCandidate:
+        self._verify_reviewer(
+            ReviewerPrincipal(
+                reviewer_id=approval.reviewer_id,
+                attestation=approval.reviewer_attestation,
+            )
+        )
+        if approval.agent_id != profile.agent_id:
+            raise PersonalizationError("approval agent_id does not match profile")
+        try:
+            evidence = self._store.load_signals(approval.evidence_ids)
+        except LearningStoreError as exc:
+            raise PersonalizationError("approval evidence is missing") from exc
+        if any(item.kind not in _HUMAN_SIGNAL_KINDS for item in evidence):
+            raise PersonalizationError(
+                "approval evidence is not explicit human feedback"
+            )
+        if len(evidence) < MIN_GUIDANCE_OCCURRENCES:
+            raise PersonalizationError("approval evidence is incomplete")
+        reconstructed = _candidate_from_human_group(evidence)
+        if (
+            reconstructed.candidate_hash != approval.candidate_hash
+            or reconstructed.body != approval.instruction_text
+            or reconstructed.evidence_ids != approval.evidence_ids
+            or reconstructed.candidate_kind != approval.candidate_kind
+            or reconstructed.skill_id != approval.skill_id
+            or reconstructed.agent_id != approval.agent_id
+        ):
+            raise PersonalizationError("approval does not match stored evidence")
+        return reconstructed
+
     def approve(
         self,
         candidate: GuidanceCandidate,
         *,
-        reviewer_id: str,
+        reviewer: ReviewerPrincipal,
         profile: AgentProfile,
-        approved_at: float | None = None,
         snapshot: InsightsSnapshot | None = None,
     ) -> ApprovalRecord:
-        actor = require_text(reviewer_id, "reviewer_id")
-        if actor not in self._allowed_approvers:
-            raise PersonalizationError("reviewer is not allowlisted")
+        if not isinstance(reviewer, ReviewerPrincipal):
+            raise PersonalizationError("reviewer principal is required")
+        verified = self._verify_reviewer(reviewer)
         if not isinstance(candidate, GuidanceCandidate):
             raise PersonalizationError("approval requires a guidance candidate")
-        trusted = self.trusted_snapshot(agent_id=candidate.agent_id, now=approved_at)
+        now = self._trusted_now()
+        trusted = self.trusted_snapshot(agent_id=candidate.agent_id, now=now)
         if snapshot is not None:
             self.verify_snapshot(snapshot)
         match = next(
@@ -1252,17 +1460,17 @@ class PersonalizationManager:
             raise PersonalizationError(
                 "candidate evidence is not explicit human feedback"
             )
+        reconstructed = _candidate_from_human_group(evidence)
+        if reconstructed != match:
+            raise PersonalizationError("candidate is fabricated, changed, or stale")
         fingerprint = profile_fingerprint(profile)
         if profile.agent_id != match.agent_id:
             raise PersonalizationError("candidate agent_id does not match profile")
         record = _finalize_approval(
             candidate=match,
-            reviewer_id=actor,
+            reviewer=verified,
             profile_fingerprint_value=fingerprint,
-            approved_at=finite_timestamp(
-                time.time() if approved_at is None else approved_at,
-                "approved_at",
-            ),
+            approved_at=now,
         )
         return self._store.append_approval(record)
 
@@ -1278,20 +1486,22 @@ class PersonalizationManager:
             if not isinstance(skill_id, str) or not skill_id.strip():
                 raise PersonalizationError("active skill ids must be non-empty strings")
         fingerprint = profile_fingerprint(profile)
+        listed = self._store.list_approvals(agent_id=profile.agent_id)
+        loaded = self._store.load_approvals(
+            tuple(approval.approval_id for approval in listed)
+        )
+        if loaded != listed:
+            raise PersonalizationError("stored approvals could not be reconstructed")
+        for approval in loaded:
+            self._revalidate_approval(approval, profile=profile)
         approvals = tuple(
             approval
-            for approval in self._store.list_approvals(agent_id=profile.agent_id)
+            for approval in loaded
             if approval.profile_fingerprint == fingerprint
         )
-        # Reconstruct trusted approval bodies from storage, never caller snapshots.
-        loaded = self._store.load_approvals(
-            tuple(approval.approval_id for approval in approvals)
-        )
-        if loaded != approvals:
-            raise PersonalizationError("stored approvals could not be reconstructed")
         approved_skills = {
             approval.skill_id
-            for approval in loaded
+            for approval in approvals
             if approval.candidate_kind is CandidateKind.SKILL and approval.skill_id
         }
         unknown = sorted(active_skills - approved_skills)
@@ -1301,7 +1511,7 @@ class PersonalizationManager:
             sorted(
                 (
                     approval
-                    for approval in loaded
+                    for approval in approvals
                     if approval.candidate_kind is CandidateKind.RULE
                 ),
                 key=lambda item: item.candidate_hash,
@@ -1311,7 +1521,7 @@ class PersonalizationManager:
             sorted(
                 (
                     approval
-                    for approval in loaded
+                    for approval in approvals
                     if approval.candidate_kind is CandidateKind.SKILL
                     and approval.skill_id in active_skills
                 ),
@@ -1453,7 +1663,9 @@ __all__ = [
     "MAX_FEEDBACK_CHARS",
     "MIN_GUIDANCE_OCCURRENCES",
     "REPORT_SCHEMA",
+    "SECONDS_PER_DAY",
     "SIGNAL_SCHEMA_VERSION",
+    "STORE_SCHEMA_VERSION",
     "ApprovalRecord",
     "CandidateKind",
     "FindingKind",
@@ -1469,6 +1681,8 @@ __all__ = [
     "LearningStoreError",
     "PersonalizationError",
     "PersonalizationManager",
+    "ReviewerPrincipal",
+    "ReviewerVerifier",
     "SignalKind",
     "build_report",
     "canonical_json",
