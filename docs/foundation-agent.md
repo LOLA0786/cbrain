@@ -170,6 +170,26 @@ sales_agent = FoundationAgent(
 
 The same `FoundationAgent` class serves every configured agent.
 
+## Insights and personalization
+
+Human-approved personalization may change instructions and non-authoritative
+metadata only. It never authorizes tools, changes routes, or widens limits.
+See `docs/hyperpersonalized-harness.md`.
+
+Learning storage stays outside the foundation loop. Observe a finished run
+explicitly:
+
+```python
+result = agent.run(run_input)
+LearningRecorder(store).record_run(
+    agent_id=profile.agent_id,
+    result=result,
+)
+```
+
+A learning-store failure must not change `result`. Every consequential
+`ActionIntent` still enters `GovernedRuntime`.
+
 ## Separation from PrivateVault
 
 | Layer | Responsibility |
