@@ -171,9 +171,8 @@ jobs:
       - name: Live knowledge integration suite
         run: |
           set -euo pipefail
-          output=$(uv run python -m pytest -q tests/test_knowledge_runtime_integration.py)
-          printf '%s\n' "$output"
-          if printf '%s\n' "$output" | grep -Eq '[1-9][0-9]* skipped'; then
+          uv run python -m pytest -q tests/test_knowledge_runtime_integration.py | tee /tmp/knowledge-live.txt
+          if grep -Eq '[1-9][0-9]* skipped' /tmp/knowledge-live.txt; then
             echo "live knowledge tests skipped unexpectedly"
             exit 1
           fi

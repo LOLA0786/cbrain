@@ -612,4 +612,9 @@ def test_live_required_knowledge_failure_prevents_tool_execution() -> None:
 
 def test_production_from_config_without_postgres_fails_closed() -> None:
     with pytest.raises((KnowledgeConfigError, KnowledgeError, KnowledgeUnavailable)):
-        KnowledgeRuntime.from_config(production=True)
+        KnowledgeRuntime.from_config(
+            config=replace(
+                default_knowledge_config(), postgres_dsn=None, redis_dsn=None
+            ),
+            production=True,
+        )
