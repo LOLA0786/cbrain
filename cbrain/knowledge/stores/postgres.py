@@ -166,16 +166,13 @@ class PostgresKnowledgeStore:
     def connect(self) -> Any:
         psycopg = _psycopg()
         try:
-            connection = psycopg.connect(
+            milliseconds = max(1, int(self._timeout_seconds * 1000))
+            return psycopg.connect(
                 self._dsn,
                 connect_timeout=_connect_timeout(self._timeout_seconds),
+                autocommit=True,
+                options=f"-c statement_timeout={milliseconds}",
             )
-            milliseconds = max(1, int(self._timeout_seconds * 1000))
-            connection.execute(
-                "SELECT set_config('statement_timeout', %s, false)",
-                (str(milliseconds),),
-            )
-            return connection
         except KnowledgeUnavailable:
             raise
         except Exception as exc:
