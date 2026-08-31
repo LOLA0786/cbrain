@@ -285,9 +285,7 @@ def _validate_rfq(
     if not isinstance(material_id, str) or (
         material_id not in bundle.procurement.catalog
     ):
-        return ArgumentValidationResult(
-            ok=False, reason=PROCUREMENT_MATERIAL_UNKNOWN
-        )
+        return ArgumentValidationResult(ok=False, reason=PROCUREMENT_MATERIAL_UNKNOWN)
     vendor_ids = arguments.get("vendor_ids")
     if not isinstance(vendor_ids, list) or not vendor_ids:
         return ArgumentValidationResult(
@@ -338,9 +336,10 @@ def _validate_procurement_money(
             return ArgumentValidationResult(
                 ok=False, reason=PROCUREMENT_REQUISITION_MISSING
             )
-        if str(requisition.get("amount_minor")) != str(amount) or str(
-            requisition.get("currency")
-        ) != currency:
+        if (
+            str(requisition.get("amount_minor")) != str(amount)
+            or str(requisition.get("currency")) != currency
+        ):
             return ArgumentValidationResult(ok=False, reason=PROCUREMENT_QUOTE_MISMATCH)
         return ArgumentValidationResult(ok=True)
     rfq_id = action.arguments.get("rfq_id")

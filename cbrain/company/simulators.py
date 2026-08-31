@@ -374,9 +374,7 @@ def default_fixture_bundle() -> CompanySimulatorBundle:
     bundle.procurement.vendors = {
         vendor.vendor_id: vendor for vendor in replica.vendors()
     }
-    bundle.procurement.catalog = {
-        item.material_id: item for item in replica.catalog()
-    }
+    bundle.procurement.catalog = {item.material_id: item for item in replica.catalog()}
     bundle.procurement.open_pos = {
         order.po_id: order for order in replica.open_purchase_orders()
     }

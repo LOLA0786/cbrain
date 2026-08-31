@@ -699,9 +699,7 @@ def _procurement_handlers(
             "vendor_id": quote.vendor_id,
             "amount_minor": quote.amount_minor,
             "currency": quote.currency,
-            "ranked_quote_ids": [
-                str(item["quote_id"]) for item in board["quotations"]
-            ],
+            "ranked_quote_ids": [str(item["quote_id"]) for item in board["quotations"]],
         }
         with sim._lock:
             sim.requisitions[pr_id] = {
