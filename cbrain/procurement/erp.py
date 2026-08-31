@@ -190,6 +190,14 @@ def merge_replica_sources(
     )
 
 
+def parse_json_boolean(value: object, *, field_name: str) -> bool:
+    """Accept only JSON booleans. Strings, integers, and null fail closed."""
+
+    if type(value) is not bool:
+        raise ProcurementError(f"{field_name} must be a JSON boolean")
+    return value
+
+
 def mapping_without_secrets(payload: Mapping[str, object]) -> Mapping[str, object]:
     for key in payload:
         if str(key).casefold() in FORBIDDEN_METADATA_KEYS:
@@ -206,7 +214,7 @@ def records_from_mapping(
             vendor_id=str(row["vendor_id"]),
             name=str(row["name"]),
             email=str(row["email"]),
-            registered=bool(row["registered"]),
+            registered=_registered_from_row(row),
             source_system=system,
         )
         for row in _object_rows(payload.get("vendors"), field_name="vendors")
@@ -254,6 +262,12 @@ def _object_rows(value: object, *, field_name: str) -> Iterable[Mapping[str, obj
     return rows
 
 
+def _registered_from_row(row: Mapping[str, object]) -> bool:
+    if "registered" not in row:
+        raise ProcurementError("registered must be a JSON boolean")
+    return parse_json_boolean(row["registered"], field_name="registered")
+
+
 __all__ = [
     "CatalogRecord",
     "ErpSystem",
@@ -263,5 +277,6 @@ __all__ = [
     "StaticReplicaSource",
     "VendorRecord",
     "merge_replica_sources",
+    "parse_json_boolean",
     "records_from_mapping",
 ]

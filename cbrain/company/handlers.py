@@ -6,7 +6,12 @@ from collections.abc import Callable, Mapping
 from decimal import Decimal
 from typing import Any
 
-from cbrain.procurement.mailbox import Quotation, quotation_board_payload
+from cbrain.procurement.erp import ProcurementError
+from cbrain.procurement.mailbox import (
+    Quotation,
+    quotation_board_payload,
+    quote_board_digest,
+)
 
 from .authority import CompanyExecutionContext
 from .kinds import CompanyAgentKind
@@ -560,12 +565,24 @@ def _coding_handlers(
     }
 
 
+def _simulated_marker() -> dict[str, Any]:
+    return {
+        "delivery_mode": "simulated",
+        "live_email_delivered": False,
+        "live_erp_posted": False,
+        "privatevault_authorized": False,
+    }
+
+
 def _procurement_handlers(
     sim: ProcurementSimulator,
 ) -> dict[str, Callable[[Mapping[str, Any]], Any]]:
     def _board(rfq_id: str) -> dict[str, Any]:
         quotes = [quote for quote in sim.quotations.values() if quote.rfq_id == rfq_id]
-        return dict(quotation_board_payload(quotes))
+        board = dict(quotation_board_payload(quotes))
+        board["rfq_id"] = rfq_id
+        board["quote_board_digest"] = quote_board_digest(board)
+        return board
 
     def lookup_vendor(arguments: Mapping[str, Any]) -> dict[str, Any]:
         vendor = sim.vendors[str(arguments["vendor_id"])]
@@ -626,11 +643,15 @@ def _procurement_handlers(
             ]
         return {"open_pos": open_pos, "requisitions": requisitions}
 
-    def send_rfq_email(arguments: Mapping[str, Any]) -> dict[str, Any]:
+    def _simulate_send_rfq_email(arguments: Mapping[str, Any]) -> dict[str, Any]:
         rfq_id = str(arguments["rfq_id"])
+        if sim.rfq_idempotency_conflict(arguments):
+            raise ProcurementError("RFQ idempotency conflict")
+        replay = sim.replay_rfq_outcome(rfq_id)
+        if replay is not None:
+            return replay
         material_id = str(arguments["material_id"])
         vendor_ids = [str(item) for item in arguments["vendor_ids"]]
-        delivered: list[str] = []
         with sim._lock:
             sim.rfqs[rfq_id] = {
                 "rfq_id": rfq_id,
@@ -645,7 +666,6 @@ def _procurement_handlers(
                         "material_id": material_id,
                     }
                 )
-                delivered.append(vendor_id)
                 template = sim.quote_templates.get((vendor_id, material_id))
                 if template is None:
                     continue
@@ -660,21 +680,28 @@ def _procurement_handlers(
                     currency=currency,
                 )
         board = _board(rfq_id)
-        return {
+        outcome = {
+            **_simulated_marker(),
             "rfq_id": rfq_id,
-            "delivered_vendor_ids": delivered,
+            "simulated_recipient_vendor_ids": vendor_ids,
             "instant": True,
             **board,
         }
+        sim.record_rfq_outcome(arguments, outcome)
+        return outcome
 
     def show_quotations(arguments: Mapping[str, Any]) -> dict[str, Any]:
         rfq_id = str(arguments["rfq_id"])
-        return {"rfq_id": rfq_id, **_board(rfq_id)}
+        return {**_simulated_marker(), **_board(rfq_id)}
 
-    def create_purchase_requisition(arguments: Mapping[str, Any]) -> dict[str, Any]:
+    def _simulate_create_purchase_requisition(
+        arguments: Mapping[str, Any],
+    ) -> dict[str, Any]:
         quote = sim.quotations[str(arguments["quote_id"])]
         pr_id = f"pr-{quote.quote_id}"
+        board = _board(quote.rfq_id)
         payload = {
+            **_simulated_marker(),
             "pr_id": pr_id,
             "rfq_id": quote.rfq_id,
             "quote_id": quote.quote_id,
@@ -683,22 +710,26 @@ def _procurement_handlers(
             "quantity": int(arguments["quantity"]),
             "amount_minor": quote.amount_minor,
             "currency": quote.currency,
+            "quote_board_digest": board["quote_board_digest"],
+            "ranked_quote_ids": [str(item["quote_id"]) for item in board["quotations"]],
         }
         with sim._lock:
-            sim.requisitions[pr_id] = payload
+            sim.requisitions[pr_id] = dict(payload)
         return payload
 
-    def award_quote(arguments: Mapping[str, Any]) -> dict[str, Any]:
+    def _simulate_award_quote(arguments: Mapping[str, Any]) -> dict[str, Any]:
         quote = sim.quotations[str(arguments["quote_id"])]
         pr_id = f"pr-{quote.quote_id}"
         board = _board(quote.rfq_id)
         payload = {
+            **_simulated_marker(),
             "pr_id": pr_id,
             "rfq_id": quote.rfq_id,
             "quote_id": quote.quote_id,
             "vendor_id": quote.vendor_id,
             "amount_minor": quote.amount_minor,
             "currency": quote.currency,
+            "quote_board_digest": board["quote_board_digest"],
             "ranked_quote_ids": [str(item["quote_id"]) for item in board["quotations"]],
         }
         with sim._lock:
@@ -710,38 +741,49 @@ def _procurement_handlers(
                 "material_id": quote.material_id,
                 "amount_minor": quote.amount_minor,
                 "currency": quote.currency,
+                "quote_board_digest": board["quote_board_digest"],
                 "awarded": True,
             }
         return payload
 
-    def release_purchase_order(arguments: Mapping[str, Any]) -> dict[str, Any]:
+    def _simulate_release_purchase_order(
+        arguments: Mapping[str, Any],
+    ) -> dict[str, Any]:
         pr_id = str(arguments["pr_id"])
         requisition = sim.requisitions[pr_id]
         po_id = f"po-rel-{pr_id}"
+        rfq_id = str(requisition["rfq_id"])
+        board = _board(rfq_id)
         payload = {
+            **_simulated_marker(),
             "po_id": po_id,
             "pr_id": pr_id,
+            "rfq_id": rfq_id,
+            "quote_id": str(requisition["quote_id"]),
             "vendor_id": requisition["vendor_id"],
             "amount_minor": requisition["amount_minor"],
             "currency": requisition["currency"],
-            "released": True,
+            "quote_board_digest": board["quote_board_digest"],
+            "ranked_quote_ids": [str(item["quote_id"]) for item in board["quotations"]],
         }
         with sim._lock:
             sim.purchase_orders[po_id] = payload
         return payload
 
-    def change_vendor_bank(arguments: Mapping[str, Any]) -> dict[str, Any]:
+    def _simulate_change_vendor_bank(arguments: Mapping[str, Any]) -> dict[str, Any]:
         return {
+            **_simulated_marker(),
             "vendor_id": str(arguments["vendor_id"]),
             "account_ref": str(arguments["account_ref"]),
-            "changed": True,
+            "simulated_effect": "not_applied",
         }
 
-    def post_erp_payment(arguments: Mapping[str, Any]) -> dict[str, Any]:
+    def _simulate_post_erp_payment(arguments: Mapping[str, Any]) -> dict[str, Any]:
         return {
+            **_simulated_marker(),
             "vendor_id": str(arguments["vendor_id"]),
             "amount_minor": str(arguments["amount_minor"]),
-            "posted": True,
+            "simulated_effect": "not_posted",
         }
 
     return {
@@ -749,13 +791,13 @@ def _procurement_handlers(
         "search_catalog": search_catalog,
         "list_registered_vendors": list_registered_vendors,
         "list_open_requisitions": list_open_requisitions,
-        "send_rfq_email": send_rfq_email,
+        "send_rfq_email": _simulate_send_rfq_email,
         "show_quotations": show_quotations,
-        "create_purchase_requisition": create_purchase_requisition,
-        "award_quote": award_quote,
-        "release_purchase_order": release_purchase_order,
-        "change_vendor_bank": change_vendor_bank,
-        "post_erp_payment": post_erp_payment,
+        "create_purchase_requisition": _simulate_create_purchase_requisition,
+        "award_quote": _simulate_award_quote,
+        "release_purchase_order": _simulate_release_purchase_order,
+        "change_vendor_bank": _simulate_change_vendor_bank,
+        "post_erp_payment": _simulate_post_erp_payment,
     }
 
 

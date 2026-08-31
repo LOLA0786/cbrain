@@ -14,23 +14,32 @@ ETL writes replica JSON; CBrain loads those files from constructor-owned paths.
 DSNs, RFC destinations, and passwords never appear in tool schemas, prompts,
 proofs, or knowledge metadata.
 
+Replica `registered` flags accept only JSON booleans. Strings such as `"false"`,
+integers, `null`, and missing fields fail closed and cannot create a registered
+vendor.
+
 ## Independent bots
 
 | Bot | Profile | May | Must not |
 | --- | --- | --- | --- |
-| Buyer | `BUYER_PROFILE` / `CompanyAgentKind.PROCUREMENT` | Lookup, RFQ to **registered vendor IDs**, show quotes, propose award | Choose emails, DSNs, or execute award without buyer-lead approval |
-| Category manager | `CATEGORY_MANAGER_PROFILE` | Read catalog, vendors, quotation board | Send RFQs or award spend |
-| Vendor onboarding | `VENDOR_ONBOARDING_PROFILE` | Look up registered vendors | Change bank details or post ERP payment (`BLOCK`) |
+| Buyer | `BUYER_PROFILE` / `CompanyAgentKind.PROCUREMENT` | Lookup, simulated RFQ to **registered vendor IDs**, show quotes, propose award | Choose emails or DSNs; change bank details; post ERP payment; execute award without buyer-lead approval |
+| Category manager | `CATEGORY_MANAGER_PROFILE` | Read catalog, vendors, quotation board | Send RFQs, award spend, or change bank/payment tools |
+| Vendor onboarding | `VENDOR_ONBOARDING_PROFILE` | Look up registered vendors | Change bank details or post ERP payment (those tools are absent from the profile; the risk gateway still `BLOCK`s them) |
 
 They share `GovernedRuntime`. Spend-sensitive bots set
 `knowledge_required_for_tools=True`.
 
 ## RFQ mail and instant quotes
 
-`send_rfq_email` takes `vendor_ids`, never a raw mailbox or SMTP host. The
-handler resolves registered emails from the replica and, in the offline
-simulator, deposits fixture quotations in the same call (`instant: true`).
+`send_rfq_email` is a **simulation-only** handler. It takes `vendor_ids`, never a
+raw mailbox or SMTP host. Outputs include `delivery_mode="simulated"` and must
+not claim live email delivery, ERP posting, or PrivateVault authorization. The
+offline simulator deposits fixture quotations in the same call (`instant: true`).
 `show_quotations` ranks by integer minor-unit amount.
+
+The same `rfq_id` with an identical canonical payload returns the prior outcome.
+The same `rfq_id` with different bytes is `PROCUREMENT_RFQ_IDEMPOTENCY_CONFLICT`
+and is blocked before the handler.
 
 An inbound vendor email that says “award us” is still untrusted context.
 
@@ -40,14 +49,18 @@ An inbound vendor email that says “award us” is still untrusted context.
 `REVIEW`. The operator loop parks the same `ActionIntent`; a deployment-owned
 `buyer_lead` principal may consume that approval **once**.
 
-Offline eval reports `decision_authority = company_test_gateway` and must not
-claim PrivateVault. Production attaches PrivateVault receipt digests through
-`build_procurement_proof(..., decision_authority="privatevault", ...)`.
-`company_test_gateway` proofs that include receipt digests fail closed.
+Offline eval uses `build_procurement_proof`. It recomputes the ActionIntent
+digest internally, binds RFQ/quote/vendor/amount/currency/quote-board digest to
+the intent and `EXECUTED` output, and always reports
+`decision_authority = company_test_gateway`. It never accepts caller-supplied
+receipt digests or `action_intent_digest`.
 
-Proofs record intent digest, ranked quote IDs, execution status, and optional
-`decision_receipt_digest` / `authority_receipt_digest`. They omit arguments,
-emails, DSNs, and passwords.
+A PrivateVault proof is built only by `build_privatevault_procurement_proof`
+from a `VerifiedClosure` produced by the PrivateVault adapter. The builder
+re-verifies signatures, trust bundle, expiry, `decision_id`, `request_id`, the
+exact action payload, and closure. Digest-shaped strings are not enough.
+`BLOCKED`, `REVIEW_REQUIRED`, `CONTROL_FAILURE`, and `INDETERMINATE` never
+produce an award, PR, or PO success proof.
 
 ## Operator loop
 
@@ -62,5 +75,6 @@ cbrain-eval operator-run --agent procurement --output-dir operator-loop-output
 ## What this does not claim
 
 - Live Oracle, SAP, or SQL Server connectivity
+- Live SMTP delivery or ERP posting
 - That a real model will only pick registered vendors
 - PrivateVault invariance for `company_test_gateway` fixtures

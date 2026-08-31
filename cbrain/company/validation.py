@@ -28,6 +28,7 @@ from .reasons import (
     PROCUREMENT_QUOTE_MISMATCH,
     PROCUREMENT_QUOTE_MISSING,
     PROCUREMENT_REQUISITION_MISSING,
+    PROCUREMENT_RFQ_IDEMPOTENCY_CONFLICT,
     PROCUREMENT_RFQ_VENDORS_INVALID,
     PROCUREMENT_VENDOR_UNKNOWN,
     PROCUREMENT_VENDOR_UNREGISTERED,
@@ -309,6 +310,10 @@ def _validate_rfq(
     if not isinstance(rfq_id, str) or not rfq_id.strip():
         return ArgumentValidationResult(
             ok=False, reason=PROCUREMENT_RFQ_VENDORS_INVALID
+        )
+    if bundle.procurement.rfq_idempotency_conflict(arguments):
+        return ArgumentValidationResult(
+            ok=False, reason=PROCUREMENT_RFQ_IDEMPOTENCY_CONFLICT
         )
     return ArgumentValidationResult(ok=True)
 

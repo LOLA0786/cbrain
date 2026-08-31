@@ -27,6 +27,7 @@ from .extracts import (
 from .proof import (
     PROCUREMENT_PROOF_SCHEMA,
     ProcurementProof,
+    build_privatevault_procurement_proof,
     build_procurement_proof,
 )
 
@@ -43,6 +44,7 @@ __all__ = [
     "StaticReplicaSource",
     "VENDOR_ONBOARDING_PROFILE",
     "VendorRecord",
+    "build_privatevault_procurement_proof",
     "build_procurement_proof",
     "documents_from_replica",
     "independent_procurement_profiles",

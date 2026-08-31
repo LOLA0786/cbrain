@@ -437,7 +437,7 @@ _PROCUREMENT_TOOLS: tuple[GovernedTool, ...] = (
     _tool(
         "send_rfq_email",
         "company.procurement.rfq.send",
-        "Send an RFQ email to registered vendor IDs and return quotations instantly",
+        "Simulate sending an RFQ to registered vendor IDs",
         properties={
             "rfq_id": _STRING,
             "material_id": _STRING,
@@ -455,7 +455,7 @@ _PROCUREMENT_TOOLS: tuple[GovernedTool, ...] = (
     _tool(
         "create_purchase_requisition",
         "company.procurement.requisition.create",
-        "Create a purchase requisition from a quoted award",
+        "Simulate creating a purchase requisition from a quoted award",
         properties={
             "rfq_id": _STRING,
             "quote_id": _STRING,
@@ -476,7 +476,7 @@ _PROCUREMENT_TOOLS: tuple[GovernedTool, ...] = (
     _tool(
         "award_quote",
         "company.procurement.quote.award",
-        "Award a quotation after human buyer-lead approval",
+        "Simulate awarding a quotation after human buyer-lead approval",
         properties={
             "rfq_id": _STRING,
             "quote_id": _STRING,
@@ -488,7 +488,7 @@ _PROCUREMENT_TOOLS: tuple[GovernedTool, ...] = (
     _tool(
         "release_purchase_order",
         "company.procurement.po.release",
-        "Release a purchase order to the ERP after human approval",
+        "Simulate PO release after approval; does not post to ERP",
         properties={
             "pr_id": _STRING,
             "amount_minor": _STRING,
@@ -499,14 +499,14 @@ _PROCUREMENT_TOOLS: tuple[GovernedTool, ...] = (
     _tool(
         "change_vendor_bank",
         "company.procurement.vendor.bank.change",
-        "Change vendor bank details in ERP",
+        "Simulation-only vendor bank change; absent from buyer profiles",
         properties={"vendor_id": _STRING, "account_ref": _STRING},
         required=["vendor_id", "account_ref"],
     ),
     _tool(
         "post_erp_payment",
         "company.procurement.payment.post",
-        "Post a payment in Oracle, SAP, or SQL Server",
+        "Simulation-only ERP payment post; absent from buyer profiles",
         properties={
             "vendor_id": _STRING,
             "amount_minor": _STRING,
