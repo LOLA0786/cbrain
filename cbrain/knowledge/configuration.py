@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field, replace
 
 from .contracts import (
     DistanceMetric,
@@ -17,17 +18,17 @@ from .errors import KnowledgeConfigError
 def _optional_dsn(value: str | None, field_name: str) -> str | None:
     if value is None or value == "":
         return None
-    text = require_text(value, field_name)
-    if any(token in text.casefold() for token in ("password=", "secret=", "api_key=")):
-        # Accept operator DSNs but never echo them later.
-        return text
-    return text
+    return require_text(value, field_name)
+
+
+def _redact_dsn(value: str | None) -> str | None:
+    return "set" if value else None
 
 
 @dataclass(frozen=True, slots=True)
 class KnowledgeConfig:
-    postgres_dsn: str | None
-    redis_dsn: str | None
+    postgres_dsn: str | None = field(repr=False)
+    redis_dsn: str | None = field(repr=False)
     cache_ttl_seconds: float
     max_document_bytes: int
     chunk_size: int
@@ -132,6 +133,28 @@ class KnowledgeConfig:
         if not isinstance(self.embedding_profile, EmbeddingProfile):
             raise KnowledgeConfigError("embedding_profile is required")
 
+    def __repr__(self) -> str:
+        return (
+            "KnowledgeConfig("
+            f"postgres_dsn={_redact_dsn(self.postgres_dsn)!r}, "
+            f"redis_dsn={_redact_dsn(self.redis_dsn)!r}, "
+            f"cache_ttl_seconds={self.cache_ttl_seconds!r}, "
+            f"max_document_bytes={self.max_document_bytes!r}, "
+            f"chunk_size={self.chunk_size!r}, "
+            f"chunk_overlap={self.chunk_overlap!r}, "
+            f"top_k={self.top_k!r}, "
+            f"vector_candidate_count={self.vector_candidate_count!r}, "
+            f"keyword_candidate_count={self.keyword_candidate_count!r}, "
+            f"graph_max_depth={self.graph_max_depth!r}, "
+            f"graph_max_nodes={self.graph_max_nodes!r}, "
+            f"retrieval_timeout_seconds={self.retrieval_timeout_seconds!r}, "
+            f"embedding_profile={self.embedding_profile!r}, "
+            f"max_context_chunks={self.max_context_chunks!r}, "
+            f"max_context_bytes={self.max_context_bytes!r}, "
+            f"max_context_tokens={self.max_context_tokens!r}, "
+            f"policy_version={self.policy_version!r})"
+        )
+
     def retrieval_digest(self) -> str:
         from .contracts import sha256_hex
 
@@ -177,4 +200,23 @@ def default_knowledge_config() -> KnowledgeConfig:
     )
 
 
-__all__ = ["KnowledgeConfig", "default_knowledge_config"]
+def knowledge_config_from_env() -> KnowledgeConfig:
+    return replace(
+        default_knowledge_config(),
+        postgres_dsn=os.environ.get("CBRAIN_KNOWLEDGE_PG_DSN") or None,
+        redis_dsn=os.environ.get("CBRAIN_KNOWLEDGE_REDIS_DSN") or None,
+    )
+
+
+def production_mode_requested() -> bool:
+    return (
+        os.environ.get("CBRAIN_KNOWLEDGE_MODE", "").strip().casefold() == "production"
+    )
+
+
+__all__ = [
+    "KnowledgeConfig",
+    "default_knowledge_config",
+    "knowledge_config_from_env",
+    "production_mode_requested",
+]

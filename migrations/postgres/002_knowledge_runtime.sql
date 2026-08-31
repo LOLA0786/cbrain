@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS knowledge_collections (
     PRIMARY KEY (tenant_id, collection_id),
     CHECK (length(tenant_id) > 0),
     CHECK (length(collection_id) > 0),
-    CHECK (embedding_dimension > 0),
+    CHECK (embedding_dimension = 8),
     CHECK (collection_revision >= 0)
 );
 
@@ -29,7 +29,10 @@ CREATE TABLE IF NOT EXISTS knowledge_documents (
     schema_version INTEGER NOT NULL,
     tombstoned BOOLEAN NOT NULL DEFAULT FALSE,
     PRIMARY KEY (tenant_id, collection_id, source_id, source_revision),
-    CHECK (source_revision > 0)
+    CHECK (source_revision > 0),
+    CHECK (cardinality(acl_principals) > 0),
+    FOREIGN KEY (tenant_id, collection_id)
+        REFERENCES knowledge_collections (tenant_id, collection_id)
 );
 
 CREATE TABLE IF NOT EXISTS knowledge_chunks (
@@ -45,15 +48,23 @@ CREATE TABLE IF NOT EXISTS knowledge_chunks (
     created_at TIMESTAMPTZ NOT NULL,
     schema_version INTEGER NOT NULL,
     text TEXT NOT NULL,
-    CHECK (chunk_index >= 0)
+    CHECK (chunk_index >= 0),
+    CHECK (cardinality(acl_principals) > 0),
+    UNIQUE (tenant_id, collection_id, source_id, source_revision, chunk_index),
+    FOREIGN KEY (tenant_id, collection_id, source_id, source_revision)
+        REFERENCES knowledge_documents (
+            tenant_id, collection_id, source_id, source_revision
+        )
 );
 
 CREATE TABLE IF NOT EXISTS knowledge_embeddings (
     chunk_id TEXT PRIMARY KEY REFERENCES knowledge_chunks(chunk_id),
     tenant_id TEXT NOT NULL,
     collection_id TEXT NOT NULL,
-    embedding vector NOT NULL,
-    profile_id TEXT NOT NULL
+    embedding vector(8) NOT NULL,
+    profile_id TEXT NOT NULL,
+    FOREIGN KEY (tenant_id, collection_id)
+        REFERENCES knowledge_collections (tenant_id, collection_id)
 );
 
 CREATE TABLE IF NOT EXISTS knowledge_graph_nodes (
@@ -69,7 +80,8 @@ CREATE TABLE IF NOT EXISTS knowledge_graph_nodes (
     source_revision INTEGER NOT NULL,
     source_id TEXT NOT NULL,
     schema_version INTEGER NOT NULL,
-    CHECK (cardinality(provenance_chunk_ids) > 0)
+    CHECK (cardinality(provenance_chunk_ids) > 0),
+    CHECK (confidence >= 0 AND confidence <= 1)
 );
 
 CREATE TABLE IF NOT EXISTS knowledge_graph_edges (
@@ -85,7 +97,10 @@ CREATE TABLE IF NOT EXISTS knowledge_graph_edges (
     source_revision INTEGER NOT NULL,
     source_id TEXT NOT NULL,
     schema_version INTEGER NOT NULL,
-    CHECK (cardinality(provenance_chunk_ids) > 0)
+    CHECK (cardinality(provenance_chunk_ids) > 0),
+    CHECK (confidence >= 0 AND confidence <= 1),
+    FOREIGN KEY (source_node_id) REFERENCES knowledge_graph_nodes(node_id),
+    FOREIGN KEY (target_node_id) REFERENCES knowledge_graph_nodes(node_id)
 );
 
 CREATE TABLE IF NOT EXISTS knowledge_revisions (
@@ -93,7 +108,10 @@ CREATE TABLE IF NOT EXISTS knowledge_revisions (
     collection_id TEXT NOT NULL,
     collection_revision INTEGER NOT NULL,
     published_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (tenant_id, collection_id, collection_revision)
+    PRIMARY KEY (tenant_id, collection_id, collection_revision),
+    CHECK (collection_revision > 0),
+    FOREIGN KEY (tenant_id, collection_id)
+        REFERENCES knowledge_collections (tenant_id, collection_id)
 );
 
 CREATE TABLE IF NOT EXISTS ingestion_jobs (
@@ -102,7 +120,10 @@ CREATE TABLE IF NOT EXISTS ingestion_jobs (
     collection_id TEXT NOT NULL,
     source_id TEXT NOT NULL,
     status TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (status IN ('completed', 'failed')),
+    FOREIGN KEY (tenant_id, collection_id)
+        REFERENCES knowledge_collections (tenant_id, collection_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_tenant_acl
@@ -117,3 +138,11 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_edges_tenant
     ON knowledge_graph_edges (tenant_id, relation_type);
 CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_fts
     ON knowledge_chunks USING GIN (to_tsvector('simple', text));
+CREATE INDEX IF NOT EXISTS idx_knowledge_embeddings_tenant
+    ON knowledge_embeddings (tenant_id, collection_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_embeddings_hnsw
+    ON knowledge_embeddings USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS idx_knowledge_revisions_tenant
+    ON knowledge_revisions (tenant_id, collection_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_jobs_tenant
+    ON ingestion_jobs (tenant_id, collection_id, source_id);

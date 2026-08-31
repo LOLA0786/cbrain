@@ -33,6 +33,10 @@ frameworks = [
 privatevault = [
     "privatevault-agent-dna",
 ]
+knowledge = [
+    "psycopg[binary]>=3.2",
+    "redis>=5.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

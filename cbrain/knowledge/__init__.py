@@ -2,6 +2,7 @@
 
 from .configuration import KnowledgeConfig
 from .contracts import (
+    INDEXED_EMBEDDING_DIMENSION,
     KNOWLEDGE_SCHEMA_VERSION,
     UNTRUSTED_SOURCE_CONTEXT,
     CacheKey,
@@ -27,6 +28,7 @@ from .ports import (
     GraphRepository,
     KeywordIndex,
     KnowledgeContextProvider,
+    KnowledgeStore,
     KVCache,
     Reranker,
     VectorIndex,
@@ -36,10 +38,12 @@ from .stores.memory import (
     DeterministicEmbeddingProvider,
     InMemoryKnowledgeStore,
     InMemoryKVCache,
+    NullKVCache,
     RuleBasedExtractor,
 )
 
 __all__ = [
+    "INDEXED_EMBEDDING_DIMENSION",
     "KNOWLEDGE_SCHEMA_VERSION",
     "UNTRUSTED_SOURCE_CONTEXT",
     "CacheKey",
@@ -65,7 +69,9 @@ __all__ = [
     "KnowledgeContextProvider",
     "KnowledgeError",
     "KnowledgeRuntime",
+    "KnowledgeStore",
     "KnowledgeUnavailable",
+    "NullKVCache",
     "Reranker",
     "RetrievedContext",
     "RetrievalDiagnostics",

@@ -561,3 +561,121 @@ def test_knowledge_cli_doctor_does_not_print_secrets(
     assert "password" not in output
     assert "postgres://" not in output
     assert "knowledge configuration is valid" in output
+
+
+def test_runtime_factories_and_protocol_store() -> None:
+    memory = KnowledgeRuntime.in_memory(clock=lambda: NOW)
+    assert memory.ingest(_document(text="Alice works at Acme.")).published is True
+    from_config = KnowledgeRuntime.from_config(clock=lambda: NOW)
+    assert (
+        from_config.ingest(_document(text="Alice works at Acme.")).source_revision == 1
+    )
+    with pytest.raises(KnowledgeError):
+        KnowledgeRuntime.from_config(
+            config=KnowledgeConfig(
+                postgres_dsn=None,
+                redis_dsn=None,
+                cache_ttl_seconds=30.0,
+                max_document_bytes=65_536,
+                chunk_size=160,
+                chunk_overlap=32,
+                top_k=4,
+                vector_candidate_count=8,
+                keyword_candidate_count=8,
+                graph_max_depth=2,
+                graph_max_nodes=16,
+                retrieval_timeout_seconds=2.0,
+                embedding_profile=EmbeddingProfile(
+                    profile_id="deterministic-8",
+                    model_id="cbrain-deterministic",
+                    dimension=8,
+                    distance_metric=DistanceMetric.COSINE,
+                    normalization_version="v1",
+                ),
+                max_context_chunks=4,
+                max_context_bytes=4_096,
+                max_context_tokens=512,
+            ),
+            production=True,
+        )
+
+
+def test_config_repr_and_errors_redact_dsns() -> None:
+    config = KnowledgeConfig(
+        postgres_dsn="postgresql://operator:supersecret@db.internal:5432/knowledge",
+        redis_dsn="redis://:cachesecret@cache.internal:6379/0",
+        cache_ttl_seconds=30.0,
+        max_document_bytes=65_536,
+        chunk_size=160,
+        chunk_overlap=32,
+        top_k=4,
+        vector_candidate_count=8,
+        keyword_candidate_count=8,
+        graph_max_depth=2,
+        graph_max_nodes=16,
+        retrieval_timeout_seconds=2.0,
+        embedding_profile=EmbeddingProfile(
+            profile_id="deterministic-8",
+            model_id="cbrain-deterministic",
+            dimension=8,
+            distance_metric=DistanceMetric.COSINE,
+            normalization_version="v1",
+        ),
+        max_context_chunks=4,
+        max_context_bytes=4_096,
+        max_context_tokens=512,
+    )
+    rendered = repr(config)
+    assert "supersecret" not in rendered
+    assert "cachesecret" not in rendered
+    assert "postgresql://" not in rendered
+    assert "redis://" not in rendered
+    from cbrain.knowledge.stores.postgres import PostgresKnowledgeStore
+
+    with pytest.raises(KnowledgeUnavailable) as raised:
+        PostgresKnowledgeStore(
+            "postgresql://operator:supersecret@127.0.0.1:1/knowledge",
+            timeout_seconds=0.2,
+        ).ping()
+    assert "supersecret" not in str(raised.value)
+    assert "postgresql://" not in str(raised.value)
+
+
+def test_redis_cache_encoding_and_subsecond_ttl() -> None:
+    from cbrain.knowledge.stores.redis_cache import (
+        decode_cache_value,
+        encode_cache_value,
+        ttl_to_milliseconds,
+    )
+
+    encoded = encode_cache_value(("chunk-a", "chunk-b"))
+    assert "\n" not in encoded
+    assert decode_cache_value(encoded) == ("chunk-a", "chunk-b")
+    assert decode_cache_value("not-json") is None
+    assert decode_cache_value('{"schema":1,"chunk_ids":"nope"}') is None
+    assert ttl_to_milliseconds(0.5) == 500
+    with pytest.raises(KnowledgeError):
+        ttl_to_milliseconds(0.0001)
+
+
+def test_postgres_adapter_and_schema_claim_durable_publication() -> None:
+    import inspect
+    from pathlib import Path
+
+    from cbrain.knowledge.contracts import INDEXED_EMBEDDING_DIMENSION
+    from cbrain.knowledge.stores.postgres import PostgresKnowledgeStore
+
+    source = inspect.getsource(PostgresKnowledgeStore)
+    assert "INSERT INTO knowledge_chunks" in source
+    assert "INSERT INTO knowledge_embeddings" in source
+    assert "INSERT INTO knowledge_graph_nodes" in source
+    assert "INSERT INTO knowledge_graph_edges" in source
+    schema = Path("migrations/postgres/002_knowledge_runtime.sql").read_text(
+        encoding="utf-8"
+    )
+    forward = Path(
+        "migrations/postgres/003_knowledge_runtime_vector_index.sql"
+    ).read_text(encoding="utf-8")
+    assert f"vector({INDEXED_EMBEDDING_DIMENSION})" in schema + forward
+    assert "hnsw" in (schema + forward).casefold()
+    assert "to_tsvector" in schema

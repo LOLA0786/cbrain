@@ -25,6 +25,7 @@ from ..contracts import (
     sha256_hex,
 )
 from ..errors import KnowledgeError, KnowledgeUnavailable
+from ..graph import bounded_walk
 
 
 def _cosine(left: Sequence[float], right: Sequence[float]) -> float:
@@ -154,6 +155,18 @@ class RuleBasedExtractor:
             source_id=chunk.source_id,
             schema_version=KNOWLEDGE_SCHEMA_VERSION,
         )
+
+
+class NullKVCache:
+    """Always misses. Used when Redis is not configured."""
+
+    def get(self, key: CacheKey) -> tuple[str, ...] | None:
+        del key
+        return None
+
+    def set(self, key: CacheKey, chunk_ids: Sequence[str], ttl_seconds: float) -> None:
+        del key, chunk_ids
+        finite_positive_ttl(ttl_seconds)
 
 
 class InMemoryKVCache:
@@ -398,43 +411,16 @@ class InMemoryKnowledgeStore:
                 continue
             adjacency.setdefault(edge.source_node_id, []).append(edge)
 
-        paths: list[GraphPath] = []
-        for seed in seed_node_ids:
-            if seed not in visible_nodes:
-                continue
-            visited: set[str] = set()
-            stack: list[
-                tuple[str, int, tuple[GraphNode, ...], tuple[GraphEdge, ...]]
-            ] = [(seed, 0, (visible_nodes[seed],), ())]
-            while stack and len(visited) < max_nodes:
-                node_id, depth, nodes, edges = stack.pop(0)
-                if node_id in visited:
-                    continue
-                visited.add(node_id)
-                citations = self._citations_for_nodes(nodes, tenant_id, principal_id)
-                if citations:
-                    paths.append(
-                        GraphPath(nodes=nodes, edges=edges, citations=citations)
-                    )
-                if depth >= max_depth:
-                    continue
-                for edge in sorted(
-                    adjacency.get(node_id, ()), key=lambda item: item.edge_id
-                ):
-                    if edge.target_node_id in visited:
-                        continue
-                    if len(visited) >= max_nodes:
-                        break
-                    target = visible_nodes[edge.target_node_id]
-                    stack.append(
-                        (
-                            edge.target_node_id,
-                            depth + 1,
-                            (*nodes, target),
-                            (*edges, edge),
-                        )
-                    )
-        return tuple(paths)
+        return bounded_walk(
+            visible_nodes=visible_nodes,
+            adjacency=adjacency,
+            seed_node_ids=seed_node_ids,
+            max_depth=max_depth,
+            max_nodes=max_nodes,
+            citations_for=lambda nodes: self._citations_for_nodes(
+                nodes, tenant_id, principal_id
+            ),
+        )
 
     def publish_revision(
         self,
@@ -609,6 +595,7 @@ __all__ = [
     "InMemoryKVCache",
     "InMemoryKnowledgeStore",
     "KeywordAdapter",
+    "NullKVCache",
     "RuleBasedExtractor",
     "VectorAdapter",
 ]

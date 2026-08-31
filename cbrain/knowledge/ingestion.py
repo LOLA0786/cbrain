@@ -15,15 +15,14 @@ from .contracts import (
     SourceDocument,
 )
 from .errors import KnowledgeError
-from .ports import EmbeddingProvider, EntityRelationExtractor
-from .stores.memory import InMemoryKnowledgeStore
+from .ports import EmbeddingProvider, EntityRelationExtractor, KnowledgeStore
 
 
 class IngestionPipeline:
     def __init__(
         self,
         *,
-        store: InMemoryKnowledgeStore,
+        store: KnowledgeStore,
         config: KnowledgeConfig,
         embeddings: EmbeddingProvider,
         extractor: EntityRelationExtractor,

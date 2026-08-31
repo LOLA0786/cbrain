@@ -44,8 +44,8 @@ jobs:
           enable-cache: true
           cache-dependency-glob: cbrain/uv.lock
 
-      - name: Install locked development and PrivateVault dependencies
-        run: uv sync --locked --extra dev --extra privatevault
+      - name: Install locked development, PrivateVault, and knowledge dependencies
+        run: uv sync --locked --extra dev --extra privatevault --extra knowledge
 
       - name: Verify PrivateVault conformance dependencies
         run: |
@@ -81,3 +81,98 @@ jobs:
 
       - name: Check whitespace errors
         run: git diff --check
+
+  knowledge-live:
+    name: knowledge-live
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    defaults:
+      run:
+        working-directory: cbrain
+
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.6-pg16
+        env:
+          POSTGRES_USER: cbrain
+          POSTGRES_PASSWORD: cbrain_ci
+          POSTGRES_DB: cbrain_knowledge
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cbrain -d cbrain_knowledge"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:7.4.5-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      CBRAIN_KNOWLEDGE_LIVE: "1"
+      CBRAIN_KNOWLEDGE_PG_DSN: postgresql://cbrain:cbrain_ci@localhost:5432/cbrain_knowledge
+      CBRAIN_KNOWLEDGE_REDIS_DSN: redis://localhost:6379/0
+      CBRAIN_KNOWLEDGE_MODE: production
+
+    steps:
+      - name: Check out CBrain
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: cbrain
+          persist-credentials: false
+
+      - name: Check out pinned PrivateVault Agent DNA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: LOLA0786/privatevault-agent-dna
+          ref: 3789a21637e99be074b5b68fcc441722b2e94ae5
+          path: privatevault-agent-dna
+          ssh-key: ${{ secrets.PRIVATEVAULT_REPO_SSH_KEY }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with:
+          enable-cache: true
+          cache-dependency-glob: cbrain/uv.lock
+
+      - name: Install locked knowledge dependencies
+        run: uv sync --locked --extra dev --extra privatevault --extra knowledge
+
+      - name: Apply knowledge migrations
+        run: |
+          uv run python - <<'PY'
+          import os
+          from cbrain.knowledge.stores.postgres import (
+              PostgresKnowledgeStore,
+              apply_knowledge_migrations,
+          )
+          dsn = os.environ["CBRAIN_KNOWLEDGE_PG_DSN"]
+          apply_knowledge_migrations(dsn, timeout_seconds=5.0)
+          store = PostgresKnowledgeStore(dsn, timeout_seconds=5.0)
+          store.ping()
+          store.require_pgvector()
+          store.require_schema()
+          print("knowledge migrations applied")
+          PY
+
+      - name: Live knowledge integration suite
+        run: |
+          set -euo pipefail
+          uv run python -m pytest -q tests/test_knowledge_runtime_integration.py | tee /tmp/knowledge-live.txt
+          if grep -Eq '[1-9][0-9]* skipped' /tmp/knowledge-live.txt; then
+            echo "live knowledge tests skipped unexpectedly"
+            exit 1
+          fi
