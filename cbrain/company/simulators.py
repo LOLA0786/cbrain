@@ -8,6 +8,15 @@ from decimal import Decimal, InvalidOperation
 from threading import RLock
 from typing import Any
 
+from cbrain.procurement.demo import demo_replica_sources
+from cbrain.procurement.erp import (
+    CatalogRecord,
+    OpenPurchaseOrder,
+    VendorRecord,
+    merge_replica_sources,
+)
+from cbrain.procurement.mailbox import Quotation
+
 from .kinds import CompanyAgentKind
 
 
@@ -112,12 +121,77 @@ class CodingSimulator:
 
 
 @dataclass
+class ProcurementSimulator:
+    vendors: dict[str, VendorRecord] = field(default_factory=dict)
+    catalog: dict[str, CatalogRecord] = field(default_factory=dict)
+    open_pos: dict[str, OpenPurchaseOrder] = field(default_factory=dict)
+    quotations: dict[str, Quotation] = field(default_factory=dict)
+    rfqs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    requisitions: dict[str, dict[str, Any]] = field(default_factory=dict)
+    purchase_orders: dict[str, dict[str, Any]] = field(default_factory=dict)
+    outbound_rfqs: list[dict[str, Any]] = field(default_factory=list)
+    quote_templates: dict[tuple[str, str], tuple[str, str]] = field(
+        default_factory=dict
+    )
+    _lock: RLock = field(default_factory=RLock, repr=False)
+
+    def snapshot(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "vendors": {
+                    vendor_id: {
+                        "vendor_id": vendor.vendor_id,
+                        "name": vendor.name,
+                        "registered": vendor.registered,
+                        "source_system": vendor.source_system.value,
+                    }
+                    for vendor_id, vendor in self.vendors.items()
+                },
+                "catalog": {
+                    material_id: {
+                        "material_id": item.material_id,
+                        "description": item.description,
+                        "source_system": item.source_system.value,
+                    }
+                    for material_id, item in self.catalog.items()
+                },
+                "open_pos": {
+                    po_id: {
+                        "po_id": order.po_id,
+                        "vendor_id": order.vendor_id,
+                        "material_id": order.material_id,
+                        "amount_minor": order.amount_minor,
+                        "currency": order.currency,
+                        "source_system": order.source_system.value,
+                    }
+                    for po_id, order in self.open_pos.items()
+                },
+                "quotations": {
+                    quote_id: {
+                        "quote_id": quote.quote_id,
+                        "rfq_id": quote.rfq_id,
+                        "vendor_id": quote.vendor_id,
+                        "material_id": quote.material_id,
+                        "amount_minor": quote.amount_minor,
+                        "currency": quote.currency,
+                    }
+                    for quote_id, quote in self.quotations.items()
+                },
+                "rfqs": deepcopy(self.rfqs),
+                "requisitions": deepcopy(self.requisitions),
+                "purchase_orders": deepcopy(self.purchase_orders),
+                "outbound_rfqs": deepcopy(self.outbound_rfqs),
+            }
+
+
+@dataclass
 class CompanySimulatorBundle:
     gtm: GTMSimulator = field(default_factory=GTMSimulator)
     operations: OperationsSimulator = field(default_factory=OperationsSimulator)
     legal: LegalSimulator = field(default_factory=LegalSimulator)
     accounts: AccountsSimulator = field(default_factory=AccountsSimulator)
     coding: CodingSimulator = field(default_factory=CodingSimulator)
+    procurement: ProcurementSimulator = field(default_factory=ProcurementSimulator)
 
     def snapshot(self) -> dict[str, Any]:
         return {
@@ -126,6 +200,7 @@ class CompanySimulatorBundle:
             "legal": self.legal.snapshot(),
             "accounts": self.accounts.snapshot(),
             "coding": self.coding.snapshot(),
+            "procurement": self.procurement.snapshot(),
         }
 
 
@@ -295,6 +370,52 @@ def default_fixture_bundle() -> CompanySimulatorBundle:
         "src/app.py": "add helper",
         "tests/test_app.py": "unit tests for add",
     }
+    replica = merge_replica_sources(demo_replica_sources())
+    bundle.procurement.vendors = {
+        vendor.vendor_id: vendor for vendor in replica.vendors()
+    }
+    bundle.procurement.catalog = {
+        item.material_id: item for item in replica.catalog()
+    }
+    bundle.procurement.open_pos = {
+        order.po_id: order for order in replica.open_purchase_orders()
+    }
+    bundle.procurement.quote_templates = {
+        ("vendor-oracle-1", "mat-steel-rod"): ("10000", "USD"),
+        ("vendor-sap-1", "mat-steel-rod"): ("11000", "USD"),
+        ("vendor-sql-1", "mat-steel-rod"): ("10500", "USD"),
+    }
+    bundle.procurement.rfqs["rfq-steel-1"] = {
+        "rfq_id": "rfq-steel-1",
+        "material_id": "mat-steel-rod",
+        "vendor_ids": ["vendor-oracle-1", "vendor-sap-1", "vendor-sql-1"],
+    }
+    bundle.procurement.quotations = {
+        "quote-oracle-1": Quotation(
+            quote_id="quote-oracle-1",
+            rfq_id="rfq-steel-1",
+            vendor_id="vendor-oracle-1",
+            material_id="mat-steel-rod",
+            amount_minor="10000",
+            currency="USD",
+        ),
+        "quote-sap-1": Quotation(
+            quote_id="quote-sap-1",
+            rfq_id="rfq-steel-1",
+            vendor_id="vendor-sap-1",
+            material_id="mat-steel-rod",
+            amount_minor="11000",
+            currency="USD",
+        ),
+        "quote-sql-1": Quotation(
+            quote_id="quote-sql-1",
+            rfq_id="rfq-steel-1",
+            vendor_id="vendor-sql-1",
+            material_id="mat-steel-rod",
+            amount_minor="10500",
+            currency="USD",
+        ),
+    }
     return bundle
 
 
@@ -306,6 +427,7 @@ def simulator_for_kind(
     | LegalSimulator
     | AccountsSimulator
     | CodingSimulator
+    | ProcurementSimulator
 ):
     if kind is CompanyAgentKind.GTM:
         return bundle.gtm
@@ -315,6 +437,8 @@ def simulator_for_kind(
         return bundle.legal
     if kind is CompanyAgentKind.CODING:
         return bundle.coding
+    if kind is CompanyAgentKind.PROCUREMENT:
+        return bundle.procurement
     return bundle.accounts
 
 
@@ -325,6 +449,7 @@ __all__ = [
     "GTMSimulator",
     "LegalSimulator",
     "OperationsSimulator",
+    "ProcurementSimulator",
     "SimulatorValidationError",
     "default_fixture_bundle",
     "load_fixture_bundle",

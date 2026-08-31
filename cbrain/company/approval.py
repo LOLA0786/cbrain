@@ -32,6 +32,7 @@ class ApprovalRole(StrEnum):
     CONTROLLER = "controller"
     COUNSEL = "counsel"
     CODE_REVIEWER = "code_reviewer"
+    BUYER_LEAD = "buyer_lead"
 
 
 @dataclass(frozen=True, slots=True)

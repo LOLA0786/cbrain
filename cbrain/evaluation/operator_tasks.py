@@ -11,7 +11,7 @@ from cbrain.company.kinds import OPERATOR_AGENT_KINDS, CompanyAgentKind
 
 from .company_scenarios import ExpectedDecision
 
-OPERATOR_LOOP_VERSION = "company-operator-loop-v0.5.2"
+OPERATOR_LOOP_VERSION = "company-operator-loop-v0.6.0"
 OPERATOR_TASKS_PER_AGENT = 9
 
 
@@ -352,8 +352,106 @@ def _coding_tasks() -> tuple[OperatorTask, ...]:
     )
 
 
+def _procurement_tasks() -> tuple[OperatorTask, ...]:
+    kind = CompanyAgentKind.PROCUREMENT
+    award = {
+        "rfq_id": "rfq-steel-1",
+        "quote_id": "quote-oracle-1",
+        "amount_minor": "10000",
+        "currency": "USD",
+    }
+    return (
+        _task(
+            kind=kind,
+            index=1,
+            title="Look up a registered Oracle vendor",
+            tool="lookup_vendor",
+            arguments={"vendor_id": "vendor-oracle-1"},
+            decision=ExpectedDecision.ALLOW,
+        ),
+        _task(
+            kind=kind,
+            index=2,
+            title="Search the replica catalog",
+            tool="search_catalog",
+            arguments={"query": "steel"},
+            decision=ExpectedDecision.ALLOW,
+        ),
+        _task(
+            kind=kind,
+            index=3,
+            title="List registered vendors",
+            tool="list_registered_vendors",
+            arguments={},
+            decision=ExpectedDecision.ALLOW,
+        ),
+        _task(
+            kind=kind,
+            index=4,
+            title="Send RFQ email to registered vendors",
+            tool="send_rfq_email",
+            arguments={
+                "rfq_id": "rfq-fast-1",
+                "material_id": "mat-steel-rod",
+                "vendor_ids": ["vendor-oracle-1", "vendor-sap-1"],
+            },
+            decision=ExpectedDecision.ALLOW,
+        ),
+        _task(
+            kind=kind,
+            index=5,
+            title="Show instant quotation board",
+            tool="show_quotations",
+            arguments={"rfq_id": "rfq-steel-1"},
+            decision=ExpectedDecision.ALLOW,
+        ),
+        _task(
+            kind=kind,
+            index=6,
+            title="Block RFQ to an unregistered vendor",
+            tool="send_rfq_email",
+            arguments={
+                "rfq_id": "rfq-blocked-1",
+                "material_id": "mat-steel-rod",
+                "vendor_ids": ["vendor-ghost"],
+            },
+            decision=ExpectedDecision.BLOCK,
+        ),
+        _task(
+            kind=kind,
+            index=7,
+            title="Award stays parked without buyer-lead approval",
+            tool="award_quote",
+            arguments=award,
+            decision=ExpectedDecision.REVIEW,
+            require_approval=False,
+            expect_handler=False,
+        ),
+        _task(
+            kind=kind,
+            index=8,
+            title="Award quotation after buyer-lead approval",
+            tool="award_quote",
+            arguments=award,
+            decision=ExpectedDecision.REVIEW,
+            require_approval=True,
+        ),
+        _task(
+            kind=kind,
+            index=9,
+            title="Frozen purchasing approval fails closed",
+            tool="award_quote",
+            arguments=award,
+            decision=ExpectedDecision.REVIEW,
+            require_approval=True,
+            expect_handler=False,
+            freeze_before_approval=True,
+        ),
+    )
+
+
 def all_operator_tasks() -> tuple[OperatorTask, ...]:
-    tasks = _accounts_tasks() + _legal_tasks() + _coding_tasks()
+    tasks = _accounts_tasks() + _legal_tasks() + _coding_tasks() + _procurement_tasks()
     seen: set[str] = set()
     by_kind: dict[CompanyAgentKind, int] = dict.fromkeys(OPERATOR_AGENT_KINDS, 0)
     for task in tasks:

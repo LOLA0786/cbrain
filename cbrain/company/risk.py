@@ -62,6 +62,20 @@ _CODING_RISKS: dict[str, ToolRiskLevel] = {
     "write_secret": ToolRiskLevel.BLOCK,
 }
 
+_PROCUREMENT_RISKS: dict[str, ToolRiskLevel] = {
+    "lookup_vendor": ToolRiskLevel.ALLOW,
+    "search_catalog": ToolRiskLevel.ALLOW,
+    "list_registered_vendors": ToolRiskLevel.ALLOW,
+    "list_open_requisitions": ToolRiskLevel.ALLOW,
+    "send_rfq_email": ToolRiskLevel.ALLOW,
+    "show_quotations": ToolRiskLevel.ALLOW,
+    "create_purchase_requisition": ToolRiskLevel.REVIEW,
+    "award_quote": ToolRiskLevel.REVIEW,
+    "release_purchase_order": ToolRiskLevel.REVIEW,
+    "change_vendor_bank": ToolRiskLevel.BLOCK,
+    "post_erp_payment": ToolRiskLevel.BLOCK,
+}
+
 _ACCOUNTS_RISKS: dict[str, ToolRiskLevel] = {
     "read_invoices": ToolRiskLevel.ALLOW,
     "extract_invoice_data": ToolRiskLevel.ALLOW,
@@ -91,6 +105,7 @@ _RISK_TABLE: dict[CompanyAgentKind, dict[str, ToolRiskLevel]] = {
     CompanyAgentKind.LEGAL: _LEGAL_RISKS,
     CompanyAgentKind.ACCOUNTS: _ACCOUNTS_RISKS,
     CompanyAgentKind.CODING: _CODING_RISKS,
+    CompanyAgentKind.PROCUREMENT: _PROCUREMENT_RISKS,
 }
 
 

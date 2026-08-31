@@ -8,6 +8,7 @@ from .profiles import (
     GTM_PROFILE,
     LEGAL_PROFILE,
     OPERATIONS_PROFILE,
+    PROCUREMENT_PROFILE,
     all_company_profiles,
     profile_for_kind,
 )
@@ -32,6 +33,7 @@ __all__ = [
     "GTM_PROFILE",
     "LEGAL_PROFILE",
     "OPERATIONS_PROFILE",
+    "PROCUREMENT_PROFILE",
     "all_company_profiles",
     "build_company_spec",
     "company_tool_registry",

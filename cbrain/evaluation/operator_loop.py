@@ -46,6 +46,9 @@ _APPROVAL_ROLE_BY_TOOL = MappingProxyType(
         "apply_patch": ApprovalRole.CODE_REVIEWER,
         "propose_patch": ApprovalRole.CODE_REVIEWER,
         "open_pull_request": ApprovalRole.CODE_REVIEWER,
+        "create_purchase_requisition": ApprovalRole.BUYER_LEAD,
+        "award_quote": ApprovalRole.BUYER_LEAD,
+        "release_purchase_order": ApprovalRole.BUYER_LEAD,
     }
 )
 

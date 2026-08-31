@@ -86,12 +86,12 @@ def main(arguments: Sequence[str] | None = None) -> int:
     )
     operator_plan = subcommands.add_parser(
         "operator-plan",
-        help="Print accounts/legal/coding operator-loop tasks",
+        help="Print accounts/legal/coding/procurement operator-loop tasks",
     )
     operator_plan.add_argument(
         "--agent",
         default="all",
-        choices=("all", "accounts", "legal", "coding"),
+        choices=("all", "accounts", "legal", "coding", "procurement"),
     )
     operator_run = subcommands.add_parser(
         "operator-run",
@@ -100,7 +100,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
     operator_run.add_argument(
         "--agent",
         default="all",
-        choices=("all", "accounts", "legal", "coding"),
+        choices=("all", "accounts", "legal", "coding", "procurement"),
     )
     operator_run.add_argument(
         "--output-dir",

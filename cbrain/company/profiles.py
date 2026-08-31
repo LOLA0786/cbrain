@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from cbrain.agent import AgentProfile, RunLimits
+from cbrain.procurement.bots import BUYER_PROFILE
 
 from .kinds import CompanyAgentKind
 from .spec import CompanyAgentSpec, EvaluationThresholds, build_company_spec
+
+PROCUREMENT_PROFILE = BUYER_PROFILE
 
 _GTM_INSTRUCTIONS = (
     "You are the GTM company agent operating offline against simulated CRM fixtures. "
@@ -197,6 +200,12 @@ _SPECS: dict[CompanyAgentKind, CompanyAgentSpec] = {
         profile=CODING_PROFILE,
         required_simulator="coding_workspace_simulator",
     ),
+    CompanyAgentKind.PROCUREMENT: build_company_spec(
+        kind=CompanyAgentKind.PROCUREMENT,
+        profile=BUYER_PROFILE,
+        required_simulator="procurement_erp_simulator",
+        evaluation_thresholds=EvaluationThresholds(source_grounding_accuracy=1.0),
+    ),
 }
 
 
@@ -218,6 +227,7 @@ __all__ = [
     "GTM_PROFILE",
     "LEGAL_PROFILE",
     "OPERATIONS_PROFILE",
+    "PROCUREMENT_PROFILE",
     "all_company_profiles",
     "profile_for_kind",
     "spec_for_kind",

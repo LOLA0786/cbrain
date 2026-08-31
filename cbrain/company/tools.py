@@ -405,8 +405,124 @@ _CODING_TOOLS: tuple[GovernedTool, ...] = (
     ),
 )
 
+_PROCUREMENT_TOOLS: tuple[GovernedTool, ...] = (
+    _tool(
+        "lookup_vendor",
+        "company.procurement.vendor.lookup",
+        "Look up a vendor from the ERP replica extract",
+        properties={"vendor_id": _STRING},
+        required=["vendor_id"],
+    ),
+    _tool(
+        "search_catalog",
+        "company.procurement.catalog.search",
+        "Search replica catalog materials",
+        properties={"query": _STRING},
+        required=["query"],
+    ),
+    _tool(
+        "list_registered_vendors",
+        "company.procurement.vendor.list_registered",
+        "List vendors registered to receive RFQs",
+        properties={"material_id": _STRING},
+        required=[],
+    ),
+    _tool(
+        "list_open_requisitions",
+        "company.procurement.requisition.list",
+        "List open purchase requisitions and replica POs",
+        properties={"vendor_id": _STRING},
+        required=[],
+    ),
+    _tool(
+        "send_rfq_email",
+        "company.procurement.rfq.send",
+        "Send an RFQ email to registered vendor IDs and return quotations instantly",
+        properties={
+            "rfq_id": _STRING,
+            "material_id": _STRING,
+            "vendor_ids": {"type": "array", "items": {"type": "string"}},
+        },
+        required=["rfq_id", "material_id", "vendor_ids"],
+    ),
+    _tool(
+        "show_quotations",
+        "company.procurement.quote.show",
+        "Show the ranked quotation board for an RFQ",
+        properties={"rfq_id": _STRING},
+        required=["rfq_id"],
+    ),
+    _tool(
+        "create_purchase_requisition",
+        "company.procurement.requisition.create",
+        "Create a purchase requisition from a quoted award",
+        properties={
+            "rfq_id": _STRING,
+            "quote_id": _STRING,
+            "material_id": _STRING,
+            "quantity": {"type": "integer"},
+            "amount_minor": _STRING,
+            "currency": _STRING,
+        },
+        required=[
+            "rfq_id",
+            "quote_id",
+            "material_id",
+            "quantity",
+            "amount_minor",
+            "currency",
+        ],
+    ),
+    _tool(
+        "award_quote",
+        "company.procurement.quote.award",
+        "Award a quotation after human buyer-lead approval",
+        properties={
+            "rfq_id": _STRING,
+            "quote_id": _STRING,
+            "amount_minor": _STRING,
+            "currency": _STRING,
+        },
+        required=["rfq_id", "quote_id", "amount_minor", "currency"],
+    ),
+    _tool(
+        "release_purchase_order",
+        "company.procurement.po.release",
+        "Release a purchase order to the ERP after human approval",
+        properties={
+            "pr_id": _STRING,
+            "amount_minor": _STRING,
+            "currency": _STRING,
+        },
+        required=["pr_id", "amount_minor", "currency"],
+    ),
+    _tool(
+        "change_vendor_bank",
+        "company.procurement.vendor.bank.change",
+        "Change vendor bank details in ERP",
+        properties={"vendor_id": _STRING, "account_ref": _STRING},
+        required=["vendor_id", "account_ref"],
+    ),
+    _tool(
+        "post_erp_payment",
+        "company.procurement.payment.post",
+        "Post a payment in Oracle, SAP, or SQL Server",
+        properties={
+            "vendor_id": _STRING,
+            "amount_minor": _STRING,
+            "currency": _STRING,
+        },
+        required=["vendor_id", "amount_minor", "currency"],
+    ),
+)
+
 _ALL_TOOLS: tuple[GovernedTool, ...] = (
-    _GTM_TOOLS + _OPERATIONS_TOOLS + _LEGAL_TOOLS + _ACCOUNTS_TOOLS + _CODING_TOOLS
+    _GTM_TOOLS
+    + _OPERATIONS_TOOLS
+    + _LEGAL_TOOLS
+    + _ACCOUNTS_TOOLS
+    + _CODING_TOOLS
+    + _PROCUREMENT_TOOLS
 )
 
 _KIND_TOOLS: dict[CompanyAgentKind, tuple[GovernedTool, ...]] = {
@@ -415,6 +531,7 @@ _KIND_TOOLS: dict[CompanyAgentKind, tuple[GovernedTool, ...]] = {
     CompanyAgentKind.LEGAL: _LEGAL_TOOLS,
     CompanyAgentKind.ACCOUNTS: _ACCOUNTS_TOOLS,
     CompanyAgentKind.CODING: _CODING_TOOLS,
+    CompanyAgentKind.PROCUREMENT: _PROCUREMENT_TOOLS,
 }
 
 
