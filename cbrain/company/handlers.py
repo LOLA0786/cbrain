@@ -6,6 +6,8 @@ from collections.abc import Callable, Mapping
 from decimal import Decimal
 from typing import Any
 
+from cbrain.procurement.mailbox import Quotation, quotation_board_payload
+
 from .authority import CompanyExecutionContext
 from .kinds import CompanyAgentKind
 from .simulators import (
@@ -15,6 +17,7 @@ from .simulators import (
     GTMSimulator,
     LegalSimulator,
     OperationsSimulator,
+    ProcurementSimulator,
     SimulatorValidationError,
     parse_decimal_minor,
 )
@@ -34,6 +37,8 @@ def build_handlers(
         return _legal_handlers(bundle.legal, context=context)
     if kind is CompanyAgentKind.CODING:
         return _coding_handlers(bundle.coding)
+    if kind is CompanyAgentKind.PROCUREMENT:
+        return _procurement_handlers(bundle.procurement)
     return _accounts_handlers(bundle.accounts)
 
 
@@ -552,6 +557,205 @@ def _coding_handlers(
         "open_pull_request": open_pull_request,
         "force_push": force_push,
         "write_secret": write_secret,
+    }
+
+
+def _procurement_handlers(
+    sim: ProcurementSimulator,
+) -> dict[str, Callable[[Mapping[str, Any]], Any]]:
+    def _board(rfq_id: str) -> dict[str, Any]:
+        quotes = [quote for quote in sim.quotations.values() if quote.rfq_id == rfq_id]
+        return dict(quotation_board_payload(quotes))
+
+    def lookup_vendor(arguments: Mapping[str, Any]) -> dict[str, Any]:
+        vendor = sim.vendors[str(arguments["vendor_id"])]
+        return {
+            "vendor_id": vendor.vendor_id,
+            "name": vendor.name,
+            "registered": vendor.registered,
+            "source_system": vendor.source_system.value,
+        }
+
+    def search_catalog(arguments: Mapping[str, Any]) -> dict[str, Any]:
+        query = str(arguments["query"]).lower()
+        matches = [
+            {
+                "material_id": item.material_id,
+                "description": item.description,
+                "source_system": item.source_system.value,
+            }
+            for item in sim.catalog.values()
+            if query in item.material_id.lower() or query in item.description.lower()
+        ]
+        return {"matches": matches}
+
+    def list_registered_vendors(arguments: Mapping[str, Any]) -> dict[str, Any]:
+        material_id = arguments.get("material_id")
+        vendors = [
+            {
+                "vendor_id": vendor.vendor_id,
+                "name": vendor.name,
+                "source_system": vendor.source_system.value,
+            }
+            for vendor in sim.vendors.values()
+            if vendor.registered
+        ]
+        if isinstance(material_id, str) and material_id.strip():
+            return {"material_id": material_id, "vendors": vendors}
+        return {"vendors": vendors}
+
+    def list_open_requisitions(arguments: Mapping[str, Any]) -> dict[str, Any]:
+        vendor_id = arguments.get("vendor_id")
+        open_pos = [
+            {
+                "po_id": order.po_id,
+                "vendor_id": order.vendor_id,
+                "material_id": order.material_id,
+                "amount_minor": order.amount_minor,
+                "currency": order.currency,
+                "source_system": order.source_system.value,
+            }
+            for order in sim.open_pos.values()
+            if vendor_id in {None, order.vendor_id}
+        ]
+        with sim._lock:
+            requisitions = list(sim.requisitions.values())
+        if isinstance(vendor_id, str) and vendor_id.strip():
+            requisitions = [
+                item for item in requisitions if item.get("vendor_id") == vendor_id
+            ]
+        return {"open_pos": open_pos, "requisitions": requisitions}
+
+    def send_rfq_email(arguments: Mapping[str, Any]) -> dict[str, Any]:
+        rfq_id = str(arguments["rfq_id"])
+        material_id = str(arguments["material_id"])
+        vendor_ids = [str(item) for item in arguments["vendor_ids"]]
+        delivered: list[str] = []
+        with sim._lock:
+            sim.rfqs[rfq_id] = {
+                "rfq_id": rfq_id,
+                "material_id": material_id,
+                "vendor_ids": vendor_ids,
+            }
+            for vendor_id in vendor_ids:
+                sim.outbound_rfqs.append(
+                    {
+                        "rfq_id": rfq_id,
+                        "vendor_id": vendor_id,
+                        "material_id": material_id,
+                    }
+                )
+                delivered.append(vendor_id)
+                template = sim.quote_templates.get((vendor_id, material_id))
+                if template is None:
+                    continue
+                amount_minor, currency = template
+                quote_id = f"quote-{rfq_id}-{vendor_id}"
+                sim.quotations[quote_id] = Quotation(
+                    quote_id=quote_id,
+                    rfq_id=rfq_id,
+                    vendor_id=vendor_id,
+                    material_id=material_id,
+                    amount_minor=amount_minor,
+                    currency=currency,
+                )
+        board = _board(rfq_id)
+        return {
+            "rfq_id": rfq_id,
+            "delivered_vendor_ids": delivered,
+            "instant": True,
+            **board,
+        }
+
+    def show_quotations(arguments: Mapping[str, Any]) -> dict[str, Any]:
+        rfq_id = str(arguments["rfq_id"])
+        return {"rfq_id": rfq_id, **_board(rfq_id)}
+
+    def create_purchase_requisition(arguments: Mapping[str, Any]) -> dict[str, Any]:
+        quote = sim.quotations[str(arguments["quote_id"])]
+        pr_id = f"pr-{quote.quote_id}"
+        payload = {
+            "pr_id": pr_id,
+            "rfq_id": quote.rfq_id,
+            "quote_id": quote.quote_id,
+            "vendor_id": quote.vendor_id,
+            "material_id": quote.material_id,
+            "quantity": int(arguments["quantity"]),
+            "amount_minor": quote.amount_minor,
+            "currency": quote.currency,
+        }
+        with sim._lock:
+            sim.requisitions[pr_id] = payload
+        return payload
+
+    def award_quote(arguments: Mapping[str, Any]) -> dict[str, Any]:
+        quote = sim.quotations[str(arguments["quote_id"])]
+        pr_id = f"pr-{quote.quote_id}"
+        board = _board(quote.rfq_id)
+        payload = {
+            "pr_id": pr_id,
+            "rfq_id": quote.rfq_id,
+            "quote_id": quote.quote_id,
+            "vendor_id": quote.vendor_id,
+            "amount_minor": quote.amount_minor,
+            "currency": quote.currency,
+            "ranked_quote_ids": [str(item["quote_id"]) for item in board["quotations"]],
+        }
+        with sim._lock:
+            sim.requisitions[pr_id] = {
+                "pr_id": pr_id,
+                "rfq_id": quote.rfq_id,
+                "quote_id": quote.quote_id,
+                "vendor_id": quote.vendor_id,
+                "material_id": quote.material_id,
+                "amount_minor": quote.amount_minor,
+                "currency": quote.currency,
+                "awarded": True,
+            }
+        return payload
+
+    def release_purchase_order(arguments: Mapping[str, Any]) -> dict[str, Any]:
+        pr_id = str(arguments["pr_id"])
+        requisition = sim.requisitions[pr_id]
+        po_id = f"po-rel-{pr_id}"
+        payload = {
+            "po_id": po_id,
+            "pr_id": pr_id,
+            "vendor_id": requisition["vendor_id"],
+            "amount_minor": requisition["amount_minor"],
+            "currency": requisition["currency"],
+            "released": True,
+        }
+        with sim._lock:
+            sim.purchase_orders[po_id] = payload
+        return payload
+
+    def change_vendor_bank(arguments: Mapping[str, Any]) -> dict[str, Any]:
+        return {
+            "vendor_id": str(arguments["vendor_id"]),
+            "account_ref": str(arguments["account_ref"]),
+            "changed": True,
+        }
+
+    def post_erp_payment(arguments: Mapping[str, Any]) -> dict[str, Any]:
+        return {
+            "vendor_id": str(arguments["vendor_id"]),
+            "amount_minor": str(arguments["amount_minor"]),
+            "posted": True,
+        }
+
+    return {
+        "lookup_vendor": lookup_vendor,
+        "search_catalog": search_catalog,
+        "list_registered_vendors": list_registered_vendors,
+        "list_open_requisitions": list_open_requisitions,
+        "send_rfq_email": send_rfq_email,
+        "show_quotations": show_quotations,
+        "create_purchase_requisition": create_purchase_requisition,
+        "award_quote": award_quote,
+        "release_purchase_order": release_purchase_order,
+        "change_vendor_bank": change_vendor_bank,
+        "post_erp_payment": post_erp_payment,
     }
 
 

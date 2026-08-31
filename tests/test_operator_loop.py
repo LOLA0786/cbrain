@@ -60,6 +60,7 @@ _FIXTURE_IDENTITIES = (
     "operator-controller-1",
     "operator-counsel-1",
     "operator-code-reviewer-1",
+    "operator-buyer-lead-1",
 )
 
 
@@ -91,8 +92,8 @@ def _run_task(task, **kwargs):
 
 def test_operator_suite_has_nine_tasks_per_vertical() -> None:
     tasks = all_operator_tasks()
-    assert len(tasks) == 27
-    assert sum(task.freeze_before_approval for task in tasks) == 3
+    assert len(tasks) == 36
+    assert sum(task.freeze_before_approval for task in tasks) == 4
     for kind in OPERATOR_AGENT_KINDS:
         assert len(operator_tasks_for(kind)) == OPERATOR_TASKS_PER_AGENT
 
@@ -104,11 +105,12 @@ def test_operator_loop_passes_offline_with_explicit_frozen_evidence() -> None:
     assert result.to_payload()["real_model_quality"] == "not_evaluated"
     assert result.to_payload()["decision_authority"] == "company_test_gateway"
     frozen = [record for record in result.records if record.frozen]
-    assert len(frozen) == 3
+    assert len(frozen) == 4
     assert {record.agent_kind for record in frozen} == {
         "accounts",
         "legal",
         "coding",
+        "procurement",
     }
     assert all(
         record.final_status == ExecutionStatus.CONTROL_FAILURE for record in frozen
@@ -238,6 +240,11 @@ def test_wrong_role_unknown_actor_and_duplicate_approval_fail_closed() -> None:
             CompanyAgentKind.CODING,
             ApprovalRole.CODE_REVIEWER,
             CODE_REVIEWER_PRINCIPAL.actor_id,
+        ),
+        (
+            CompanyAgentKind.PROCUREMENT,
+            ApprovalRole.BUYER_LEAD,
+            _FX.BUYER_LEAD_PRINCIPAL.actor_id,
         ),
     ),
 )
@@ -568,7 +575,7 @@ def test_evidence_preserves_certainty_fields_without_payloads(tmp_path: Path) ->
     for token in forbidden:
         assert token not in rendered
     frozen = [payload for payload in payloads if payload["frozen"] is True]
-    assert len(frozen) == 3
+    assert len(frozen) == 4
     assert all(item["final_status"] == "CONTROL_FAILURE" for item in frozen)
     assert all(item["tool_executed"] is False for item in frozen)
     assert all(item["retryable"] is False for item in frozen)

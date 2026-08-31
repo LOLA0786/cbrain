@@ -21,12 +21,17 @@ CODE_REVIEWER_PRINCIPAL = ApprovalPrincipal(
     actor_id="operator-code-reviewer-1",
     role=ApprovalRole.CODE_REVIEWER,
 )
+BUYER_LEAD_PRINCIPAL = ApprovalPrincipal(
+    actor_id="operator-buyer-lead-1",
+    role=ApprovalRole.BUYER_LEAD,
+)
 
 APPROVER_DIRECTORY = MappingProxyType(
     {
         ApprovalRole.CONTROLLER: frozenset({CONTROLLER_PRINCIPAL.actor_id}),
         ApprovalRole.COUNSEL: frozenset({COUNSEL_PRINCIPAL.actor_id}),
         ApprovalRole.CODE_REVIEWER: frozenset({CODE_REVIEWER_PRINCIPAL.actor_id}),
+        ApprovalRole.BUYER_LEAD: frozenset({BUYER_LEAD_PRINCIPAL.actor_id}),
     }
 )
 
@@ -35,5 +40,6 @@ PRINCIPAL_BY_AGENT = MappingProxyType(
         CompanyAgentKind.ACCOUNTS: CONTROLLER_PRINCIPAL,
         CompanyAgentKind.LEGAL: COUNSEL_PRINCIPAL,
         CompanyAgentKind.CODING: CODE_REVIEWER_PRINCIPAL,
+        CompanyAgentKind.PROCUREMENT: BUYER_LEAD_PRINCIPAL,
     }
 )

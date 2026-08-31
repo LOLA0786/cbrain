@@ -11,6 +11,7 @@ class CompanyAgentKind(StrEnum):
     LEGAL = "legal"
     ACCOUNTS = "accounts"
     CODING = "coding"
+    PROCUREMENT = "procurement"
 
 
 MATRIX_AGENT_KINDS: tuple[CompanyAgentKind, ...] = (
@@ -24,6 +25,7 @@ OPERATOR_AGENT_KINDS: tuple[CompanyAgentKind, ...] = (
     CompanyAgentKind.ACCOUNTS,
     CompanyAgentKind.LEGAL,
     CompanyAgentKind.CODING,
+    CompanyAgentKind.PROCUREMENT,
 )
 
 

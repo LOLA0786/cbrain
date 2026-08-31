@@ -36,11 +36,11 @@ def fixture_pricing():
     return load_pricing_catalog(default_pricing_catalog_path())
 
 
-def test_five_profiles_share_foundation_contract() -> None:
+def test_six_profiles_share_foundation_contract() -> None:
     specs = all_company_profiles()
-    assert len(specs) == 5
+    assert len(specs) == 6
     ids = {spec.agent_id for spec in specs}
-    assert len(ids) == 5
+    assert len(ids) == 6
 
 
 def test_tool_allowlists_are_isolated() -> None:
@@ -49,13 +49,17 @@ def test_tool_allowlists_are_isolated() -> None:
     legal = spec_for_kind(CompanyAgentKind.LEGAL).profile.permitted_tools
     accounts = spec_for_kind(CompanyAgentKind.ACCOUNTS).profile.permitted_tools
     coding = spec_for_kind(CompanyAgentKind.CODING).profile.permitted_tools
+    procurement = spec_for_kind(CompanyAgentKind.PROCUREMENT).profile.permitted_tools
     assert gtm.isdisjoint(ops)
     assert gtm.isdisjoint(legal)
     assert gtm.isdisjoint(accounts)
     assert gtm.isdisjoint(coding)
+    assert gtm.isdisjoint(procurement)
     assert ops.isdisjoint(accounts)
     assert legal.isdisjoint(coding)
     assert accounts.isdisjoint(coding)
+    assert accounts.isdisjoint(procurement)
+    assert coding.isdisjoint(procurement)
 
 
 def test_review_and_block_never_execute_handlers() -> None:
@@ -252,6 +256,31 @@ def _sample_arguments(tool: str) -> dict[str, object]:
         "change_vendor": {"vendor_id": "vendor-1", "new_name": "n"},
         "prepare_payment": {
             "invoice_id": "inv-1",
+            "amount_minor": "10000",
+            "currency": "USD",
+        },
+        "award_quote": {
+            "rfq_id": "rfq-steel-1",
+            "quote_id": "quote-oracle-1",
+            "amount_minor": "10000",
+            "currency": "USD",
+        },
+        "create_purchase_requisition": {
+            "rfq_id": "rfq-steel-1",
+            "quote_id": "quote-oracle-1",
+            "material_id": "mat-steel-rod",
+            "quantity": 10,
+            "amount_minor": "10000",
+            "currency": "USD",
+        },
+        "release_purchase_order": {
+            "pr_id": "pr-1",
+            "amount_minor": "10000",
+            "currency": "USD",
+        },
+        "change_vendor_bank": {"vendor_id": "vendor-oracle-1", "account_ref": "bank"},
+        "post_erp_payment": {
+            "vendor_id": "vendor-oracle-1",
             "amount_minor": "10000",
             "currency": "USD",
         },

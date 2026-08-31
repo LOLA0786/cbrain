@@ -12,7 +12,7 @@ from .kinds import CompanyAgentKind
 from .risk import ToolRiskLevel, risk_for_tool
 from .tools import company_tool_registry, tools_for_kind
 
-COMPANY_AGENT_VERSION = "0.4.1"
+COMPANY_AGENT_VERSION = "0.6.0"
 SCENARIO_SUITE_VERSION = "company-offline-v0.4.1"
 
 

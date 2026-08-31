@@ -302,8 +302,9 @@ tools are denied. Pins live in `upstreams.lock.json`.
 ### 5.4 Company agents (configuration, not new runtimes)
 
 Four kinds share one `FoundationAgent`: **GTM, Operations, Legal, Accounts**.
-A fifth kind, **Coding**, is configured the same way but is exercised through
-the operator loop (approval resume), not the 200-case × 6-route fixture matrix.
+A fifth kind, **Coding**, and a sixth, **Procurement**, are configured the same
+way but are exercised through the operator loop (approval resume), not the
+200-case × 6-route fixture matrix.
 
 | Kind | Typical allow / review / block |
 | --- | --- |
@@ -312,11 +313,14 @@ the operator loop (approval resume), not the 200-case × 6-route fixture matrix.
 | Legal | In-scope extract/search allow; sign/commit block or review; matter isolation |
 | Accounts | Reads allow; prepare/execute payment review; invalid money **block** |
 | Coding | Search/read/test allow; patch/PR review; force-push and secrets **block** |
+| Procurement | Replica lookup and registered-vendor RFQ allow; award/PR/PO **review**; bank change and ERP payment **block** |
 
 Legal scope comes from `CompanyExecutionContext` (deployment-owned
 `permitted_matter_ids`), not from the model widening `matter_id`.
 Invalid money uses `Decimal` only; it is BLOCK, never REVIEW, and never
-reaches the handler.
+reaches the handler. Procurement RFQs use registered `vendor_id`s from ERP
+replica extracts (Oracle, SAP, SQL Server tags). The model never receives a
+DSN or chooses a vendor email. See `docs/procurement-agents.md`.
 
 `CompanyRiskGateway` is a **fixture/eval** mapping of tool risk + validation
 onto the same `ExecutionStatus` values. Reports must say
@@ -324,16 +328,18 @@ onto the same `ExecutionStatus` values. Reports must say
 invariance or live-model quality.
 
 **Operator loop** (`cbrain/company/approval.py`, `evaluation/operator_loop.py`):
-Accounts, Legal, and Coding REVIEW tools are parked as the same `ActionIntent`.
-An identity adapter supplies an authenticated principal, while a
+Accounts, Legal, Coding, and Procurement REVIEW tools are parked as the same
+`ActionIntent`. An identity adapter supplies an authenticated principal, while a
 deployment-owned directory binds Accounts to a controller, Legal to counsel,
-and Coding to a code reviewer. The role-bound approval may run the handler
-**once**; a replacement approval or second completion is blocked. A frozen
-inbox never approves or dispatches. A pre-send freeze is `CONTROL_FAILURE` with
-`tool_executed=false`; possible execution after a send begins is
-`INDETERMINATE`, frozen, and never retried. Evidence packs record intent digest,
-statuses, role, approver identity, execution certainty, and retryability — not
-tool arguments.
+Coding to a code reviewer, and Procurement to a buyer lead. The role-bound
+approval may run the handler **once**; a replacement approval or second
+completion is blocked. A frozen inbox never approves or dispatches. A pre-send
+freeze is `CONTROL_FAILURE` with `tool_executed=false`; possible execution after
+a send begins is `INDETERMINATE`, frozen, and never retried. Evidence packs
+record intent digest, statuses, role, approver identity, execution certainty,
+and retryability — not tool arguments. Procurement award proofs may additionally
+carry PrivateVault receipt digests when a real PrivateVault gateway supplied
+them; offline fixtures must not.
 
 ### 5.5 Evaluation — four layers, four claims
 
