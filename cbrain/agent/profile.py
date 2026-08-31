@@ -23,6 +23,7 @@ class AgentProfile:
     timeout_seconds: float
     limits: RunLimits = RunLimits()
     metadata: Mapping[str, Any] | None = None
+    knowledge_required_for_tools: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.agent_id, str) or not self.agent_id.strip():
@@ -57,6 +58,8 @@ class AgentProfile:
         )
         if not isinstance(self.limits, RunLimits):
             raise ValueError("limits must be a RunLimits")
+        if not isinstance(self.knowledge_required_for_tools, bool):
+            raise ValueError("knowledge_required_for_tools must be a bool")
         if self.metadata is not None:
             if not isinstance(self.metadata, Mapping):
                 raise ValueError("metadata must be a mapping")
