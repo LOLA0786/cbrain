@@ -22,7 +22,7 @@ from cbrain.company.risk import ToolRiskLevel
 from cbrain.company.simulators import load_fixture_bundle
 from cbrain.company.spec import CompanyAgentSpec
 from cbrain.company.tools import tools_for_kind
-from cbrain.contracts import ActionIntent, GovernedExecution
+from cbrain.contracts import ActionIntent
 from cbrain.evaluation.company_harness import canonical_action_intent_digest
 from cbrain.knowledge import KnowledgeRuntime, RetrievalQuery
 from cbrain.models import CompletionRequest, ModelRouter, TextOutput
@@ -70,7 +70,10 @@ def test_independent_bots_share_buyer_runtime_but_not_write_tools() -> None:
     assert "send_rfq_email" not in CATEGORY_MANAGER_PROFILE.permitted_tools
     assert "award_quote" not in CATEGORY_MANAGER_PROFILE.permitted_tools
     assert "award_quote" not in VENDOR_ONBOARDING_PROFILE.permitted_tools
-    assert "change_vendor_bank" in VENDOR_ONBOARDING_PROFILE.permitted_tools
+    assert "change_vendor_bank" not in BUYER_PROFILE.permitted_tools
+    assert "post_erp_payment" not in BUYER_PROFILE.permitted_tools
+    assert "change_vendor_bank" not in VENDOR_ONBOARDING_PROFILE.permitted_tools
+    assert "post_erp_payment" not in VENDOR_ONBOARDING_PROFILE.permitted_tools
 
 
 def test_replica_extracts_are_tagged_by_oracle_sap_and_sql_server() -> None:
@@ -148,6 +151,10 @@ def test_rfq_to_registered_vendors_shows_quotations_instantly() -> None:
     output = execution.output
     assert output["instant"] is True
     assert output["count"] == 3
+    assert output["delivery_mode"] == "simulated"
+    assert output["live_email_delivered"] is False
+    assert output["live_erp_posted"] is False
+    assert output["privatevault_authorized"] is False
     assert output["quotations"][0]["vendor_id"] == "vendor-oracle-1"
     assert output["quotations"][0]["amount_minor"] == "10000"
     shown = handlers["show_quotations"]({"rfq_id": "rfq-fast-1"})
@@ -177,7 +184,7 @@ def test_unregistered_vendor_rfq_is_blocked_before_handler() -> None:
     assert bundle.procurement.outbound_rfqs == []
 
 
-def test_award_requires_buyer_lead_and_emits_privatevault_shaped_proof() -> None:
+def test_award_requires_buyer_lead_and_emits_offline_proof() -> None:
     spec = spec_for_kind(CompanyAgentKind.PROCUREMENT)
     bundle = load_fixture_bundle("default")
     inner = CompanyRiskGateway(spec, bundle=bundle)
@@ -210,61 +217,31 @@ def test_award_requires_buyer_lead_and_emits_privatevault_shaped_proof() -> None
     final = GovernedRuntime(gateway).execute(action, handlers["award_quote"])
     assert final.status is ExecutionStatus.EXECUTED
     assert final.output["vendor_id"] == "vendor-oracle-1"
+    assert final.output["delivery_mode"] == "simulated"
+    assert final.output["privatevault_authorized"] is False
     board = handlers["show_quotations"]({"rfq_id": "rfq-steel-1"})
     offline = build_procurement_proof(
         action=action,
         execution=final,
-        rfq_id="rfq-steel-1",
         quote_board=board,
-        quote_id="quote-oracle-1",
-        awarded_vendor_id="vendor-oracle-1",
-        decision_authority="company_test_gateway",
-        action_intent_digest=digest,
     )
-    assert offline.to_payload()["decision_receipt_digest"] is None
-    with pytest.raises(ProcurementError, match="must not claim"):
+    payload = offline.to_payload()
+    assert payload["decision_authority"] == "company_test_gateway"
+    assert payload["decision_receipt_digest"] is None
+    assert payload["authority_receipt_digest"] is None
+    assert payload["action_intent_digest"] == digest
+    assert payload["quote_id"] == "quote-oracle-1"
+    assert payload["awarded_vendor_id"] == "vendor-oracle-1"
+    with pytest.raises(TypeError):
         build_procurement_proof(
             action=action,
             execution=final,
-            rfq_id="rfq-steel-1",
             quote_board=board,
-            decision_authority="company_test_gateway",
+            decision_authority="privatevault",
             action_intent_digest=digest,
             decision_receipt_digest=RECEIPT,
             authority_receipt_digest=RECEIPT,
         )
-    sealed = ActionIntent.capture(
-        agent_id=spec.agent_id,
-        framework="test",
-        tool_name="award_quote",
-        capability=spec.tools.get("award_quote").capability,
-        arguments=dict(action.arguments),
-        request_id=action.request_id,
-    )
-    pv_execution = GovernedExecution(
-        status=ExecutionStatus.EXECUTED,
-        request_id=action.request_id,
-        tool_executed=True,
-        reason="allow",
-        decision_id="dec-pv-1",
-        output=final.output,
-    )
-    proof = build_procurement_proof(
-        action=sealed,
-        execution=pv_execution,
-        rfq_id="rfq-steel-1",
-        quote_board=board,
-        quote_id="quote-oracle-1",
-        awarded_vendor_id="vendor-oracle-1",
-        decision_authority="privatevault",
-        action_intent_digest=digest,
-        decision_receipt_digest=RECEIPT,
-        authority_receipt_digest=RECEIPT,
-    )
-    payload = proof.to_payload()
-    assert payload["decision_receipt_digest"] == RECEIPT
-    assert payload["authority_receipt_digest"] == RECEIPT
-    assert payload["decision_id"] == "dec-pv-1"
     rendered = str(payload)
     assert "dsn" not in rendered
     assert "password" not in rendered

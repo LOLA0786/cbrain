@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
@@ -12,10 +13,16 @@ from cbrain.procurement.demo import demo_replica_sources
 from cbrain.procurement.erp import (
     CatalogRecord,
     OpenPurchaseOrder,
+    ProcurementError,
     VendorRecord,
     merge_replica_sources,
 )
-from cbrain.procurement.mailbox import Quotation
+from cbrain.procurement.mailbox import (
+    Quotation,
+    canonical_rfq_digest,
+    quotation_board_payload,
+    quote_board_digest,
+)
 
 from .kinds import CompanyAgentKind
 
@@ -133,7 +140,35 @@ class ProcurementSimulator:
     quote_templates: dict[tuple[str, str], tuple[str, str]] = field(
         default_factory=dict
     )
+    rfq_fingerprints: dict[str, str] = field(default_factory=dict)
+    rfq_outcomes: dict[str, dict[str, Any]] = field(default_factory=dict)
     _lock: RLock = field(default_factory=RLock, repr=False)
+
+    def rfq_idempotency_conflict(self, arguments: Mapping[str, Any]) -> bool:
+        rfq_id = arguments.get("rfq_id")
+        if not isinstance(rfq_id, str) or not rfq_id.strip():
+            return False
+        digest = canonical_rfq_digest(arguments)
+        with self._lock:
+            existing = self.rfq_fingerprints.get(rfq_id)
+            return existing is not None and existing != digest
+
+    def replay_rfq_outcome(self, rfq_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            outcome = self.rfq_outcomes.get(rfq_id)
+            return deepcopy(outcome) if outcome is not None else None
+
+    def record_rfq_outcome(
+        self, arguments: Mapping[str, Any], outcome: Mapping[str, Any]
+    ) -> None:
+        rfq_id = str(arguments["rfq_id"])
+        digest = canonical_rfq_digest(arguments)
+        with self._lock:
+            existing = self.rfq_fingerprints.get(rfq_id)
+            if existing is not None and existing != digest:
+                raise ProcurementError("RFQ idempotency conflict")
+            self.rfq_fingerprints[rfq_id] = digest
+            self.rfq_outcomes[rfq_id] = deepcopy(dict(outcome))
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
@@ -181,6 +216,8 @@ class ProcurementSimulator:
                 "requisitions": deepcopy(self.requisitions),
                 "purchase_orders": deepcopy(self.purchase_orders),
                 "outbound_rfqs": deepcopy(self.outbound_rfqs),
+                "rfq_fingerprints": dict(self.rfq_fingerprints),
+                "rfq_outcomes": deepcopy(self.rfq_outcomes),
             }
 
 
@@ -414,7 +451,32 @@ def default_fixture_bundle() -> CompanySimulatorBundle:
             currency="USD",
         ),
     }
+    _seed_fixture_rfq(bundle.procurement)
     return bundle
+
+
+def _seed_fixture_rfq(sim: ProcurementSimulator) -> None:
+    arguments = {
+        "rfq_id": "rfq-steel-1",
+        "material_id": "mat-steel-rod",
+        "vendor_ids": ["vendor-oracle-1", "vendor-sap-1", "vendor-sql-1"],
+    }
+    quotes = [
+        quote for quote in sim.quotations.values() if quote.rfq_id == "rfq-steel-1"
+    ]
+    board = dict(quotation_board_payload(quotes))
+    outcome = {
+        "rfq_id": "rfq-steel-1",
+        "delivery_mode": "simulated",
+        "live_email_delivered": False,
+        "live_erp_posted": False,
+        "privatevault_authorized": False,
+        "simulated_recipient_vendor_ids": list(arguments["vendor_ids"]),
+        "instant": True,
+        "quote_board_digest": quote_board_digest(board),
+        **board,
+    }
+    sim.record_rfq_outcome(arguments, outcome)
 
 
 def simulator_for_kind(

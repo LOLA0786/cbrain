@@ -1,11 +1,14 @@
-"""Registered-vendor RFQ delivery and instant quotation ranking."""
+"""Registered-vendor RFQ ranking and canonical RFQ idempotency."""
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from types import MappingProxyType
+from typing import Any
 
 from .erp import ProcurementError, VendorRecord
 
@@ -54,6 +57,7 @@ def quotation_board_payload(quotes: Sequence[Quotation]) -> Mapping[str, object]
         {
             "instant": True,
             "count": len(ranked),
+            "delivery_mode": "simulated",
             "quotations": [
                 {
                     "rank": index,
@@ -70,9 +74,34 @@ def quotation_board_payload(quotes: Sequence[Quotation]) -> Mapping[str, object]
     )
 
 
+def canonical_rfq_digest(arguments: Mapping[str, Any]) -> str:
+    payload = {
+        "material_id": arguments["material_id"],
+        "rfq_id": arguments["rfq_id"],
+        "vendor_ids": list(arguments["vendor_ids"]),
+    }
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def quote_board_digest(quote_board: Mapping[str, Any]) -> str:
+    payload = {
+        "count": quote_board.get("count"),
+        "quotations": quote_board.get("quotations"),
+    }
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 __all__ = [
     "Quotation",
+    "canonical_rfq_digest",
     "quotation_board_payload",
+    "quote_board_digest",
     "rank_quotations",
     "require_registered_vendor",
 ]

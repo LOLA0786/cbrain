@@ -337,9 +337,10 @@ completion is blocked. A frozen inbox never approves or dispatches. A pre-send
 freeze is `CONTROL_FAILURE` with `tool_executed=false`; possible execution after
 a send begins is `INDETERMINATE`, frozen, and never retried. Evidence packs
 record intent digest, statuses, role, approver identity, execution certainty,
-and retryability — not tool arguments. Procurement award proofs may additionally
-carry PrivateVault receipt digests when a real PrivateVault gateway supplied
-them; offline fixtures must not.
+and retryability — not tool arguments. Procurement award proofs may carry
+PrivateVault receipt digests only when `build_privatevault_procurement_proof`
+re-verifies a `VerifiedClosure` from the PrivateVault adapter. Offline fixtures
+must use `build_procurement_proof` and must not claim PrivateVault.
 
 ### 5.5 Evaluation — four layers, four claims
 

@@ -49,6 +49,7 @@ def main() -> int:
     sent = runtime.execute(rfq, handlers["send_rfq_email"])
     print("rfq status:", sent.status.value)
     print("instant quotes:", sent.output["count"] if sent.output else 0)
+    print("delivery_mode:", sent.output.get("delivery_mode") if sent.output else None)
 
     inbox = ApprovalInbox(
         allowed_approvers=_DIRECTORY,
@@ -81,12 +82,7 @@ def main() -> int:
     proof = build_procurement_proof(
         action=award,
         execution=done,
-        rfq_id="rfq-demo-1",
         quote_board=board,
-        quote_id=str(done.output["quote_id"]),
-        awarded_vendor_id=str(done.output["vendor_id"]),
-        decision_authority="company_test_gateway",
-        action_intent_digest=canonical_action_intent_digest(award),
     )
     print("award status:", done.status.value)
     print("proof authority:", proof.decision_authority)
