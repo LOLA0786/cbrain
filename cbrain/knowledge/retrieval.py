@@ -22,21 +22,15 @@ from .contracts import (
 from .errors import KnowledgeUnavailable
 from .fusion import reciprocal_rank_fusion
 from .metrics import StageTimer
-from .ports import EmbeddingProvider
-from .stores.memory import (
-    InMemoryKnowledgeStore,
-    InMemoryKVCache,
-    KeywordAdapter,
-    VectorAdapter,
-)
+from .ports import EmbeddingProvider, KnowledgeStore, KVCache
 
 
 class HybridRetriever:
     def __init__(
         self,
         *,
-        store: InMemoryKnowledgeStore,
-        cache: InMemoryKVCache,
+        store: KnowledgeStore,
+        cache: KVCache,
         config: KnowledgeConfig,
         embeddings: EmbeddingProvider,
         expand_graph: bool = True,
@@ -45,8 +39,6 @@ class HybridRetriever:
         self._cache = cache
         self._config = config
         self._embeddings = embeddings
-        self._vectors = VectorAdapter(store)
-        self._keywords = KeywordAdapter(store)
         self._expand_graph = expand_graph
 
     def retrieve(self, query: RetrievalQuery) -> RetrievedContext:
@@ -81,7 +73,7 @@ class HybridRetriever:
                     [query.text], self._config.embedding_profile
                 )[0]
             with timer.stage("vector"):
-                vector_hits = self._vectors.search(
+                vector_hits = self._store.search_vector(
                     tenant_id=query.tenant_id,
                     collection_id=query.collection_id,
                     principal_id=query.principal_id,
@@ -89,7 +81,7 @@ class HybridRetriever:
                     limit=self._config.vector_candidate_count,
                 )
             with timer.stage("keyword"):
-                keyword_hits = self._keywords.search(
+                keyword_hits = self._store.search_keyword(
                     tenant_id=query.tenant_id,
                     collection_id=query.collection_id,
                     principal_id=query.principal_id,

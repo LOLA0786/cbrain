@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 
-from .contracts import GraphEdge, GraphNode, GraphPath
+from .contracts import Citation, GraphEdge, GraphNode, GraphPath
 from .errors import KnowledgeError
-from .stores.memory import InMemoryKnowledgeStore
+from .ports import KnowledgeStore
 
 
 def require_provenance(node: GraphNode | GraphEdge) -> None:
@@ -42,8 +42,56 @@ def resolve_entities(
     return candidate, 0.0, "no-match"
 
 
+def bounded_walk(
+    *,
+    visible_nodes: Mapping[str, GraphNode],
+    adjacency: Mapping[str, Sequence[GraphEdge]],
+    seed_node_ids: Sequence[str],
+    max_depth: int,
+    max_nodes: int,
+    citations_for: Callable[[Sequence[GraphNode]], tuple[Citation, ...]],
+) -> tuple[GraphPath, ...]:
+    paths: list[GraphPath] = []
+    for seed in seed_node_ids:
+        if seed not in visible_nodes:
+            continue
+        visited: set[str] = set()
+        stack: list[tuple[str, int, tuple[GraphNode, ...], tuple[GraphEdge, ...]]] = [
+            (seed, 0, (visible_nodes[seed],), ())
+        ]
+        while stack and len(visited) < max_nodes:
+            node_id, depth, nodes, edges = stack.pop(0)
+            if node_id in visited:
+                continue
+            visited.add(node_id)
+            citations = citations_for(nodes)
+            if citations:
+                paths.append(GraphPath(nodes=nodes, edges=edges, citations=citations))
+            if depth >= max_depth:
+                continue
+            for edge in sorted(
+                adjacency.get(node_id, ()), key=lambda item: item.edge_id
+            ):
+                if edge.target_node_id in visited:
+                    continue
+                if len(visited) >= max_nodes:
+                    break
+                target = visible_nodes.get(edge.target_node_id)
+                if target is None:
+                    continue
+                stack.append(
+                    (
+                        edge.target_node_id,
+                        depth + 1,
+                        (*nodes, target),
+                        (*edges, edge),
+                    )
+                )
+    return tuple(paths)
+
+
 def graph_paths(
-    store: InMemoryKnowledgeStore,
+    store: KnowledgeStore,
     *,
     tenant_id: str,
     principal_id: str,
@@ -60,4 +108,9 @@ def graph_paths(
     )
 
 
-__all__ = ["graph_paths", "require_provenance", "resolve_entities"]
+__all__ = [
+    "bounded_walk",
+    "graph_paths",
+    "require_provenance",
+    "resolve_entities",
+]

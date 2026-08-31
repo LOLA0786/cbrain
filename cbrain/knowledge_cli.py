@@ -17,7 +17,10 @@ from .knowledge import (
     RetrievalQuery,
     SourceDocument,
 )
-from .knowledge.configuration import default_knowledge_config
+from .knowledge.configuration import (
+    knowledge_config_from_env,
+    production_mode_requested,
+)
 from .knowledge.stores.postgres import PostgresKnowledgeStore
 from .knowledge.stores.redis_cache import RedisKVCache
 
@@ -57,9 +60,11 @@ def main(arguments: Sequence[str] | None = None) -> int:
     status.add_argument("--collection-id", required=True)
     parsed = parser.parse_args(arguments)
     try:
+        config = knowledge_config_from_env()
+        production = production_mode_requested() or bool(config.postgres_dsn)
         if parsed.command == "doctor":
-            return _doctor()
-        runtime = KnowledgeRuntime()
+            return _doctor(production=production)
+        runtime = KnowledgeRuntime.from_config(config=config, production=production)
         if parsed.command == "ingest":
             return _ingest(runtime, parsed)
         if parsed.command == "query":
@@ -72,19 +77,36 @@ def main(arguments: Sequence[str] | None = None) -> int:
         return 2
 
 
-def _doctor() -> int:
-    config = default_knowledge_config()
+def _doctor(*, production: bool) -> int:
+    config = knowledge_config_from_env()
     print("knowledge configuration is valid")
     print(f"embedding_profile={config.embedding_profile.profile_id}")
     print(f"cache_ttl_seconds={config.cache_ttl_seconds}")
+    if production and not config.postgres_dsn:
+        print("postgres=not_configured")
+        return 2
     if config.postgres_dsn:
         try:
-            PostgresKnowledgeStore(
-                config.postgres_dsn, timeout_seconds=config.retrieval_timeout_seconds
-            ).ping()
+            store = PostgresKnowledgeStore(
+                config.postgres_dsn,
+                timeout_seconds=config.retrieval_timeout_seconds,
+            )
+            store.ping()
             print("postgres=connected")
         except KnowledgeUnavailable:
             print("postgres=unavailable")
+            return 2
+        try:
+            store.require_pgvector()
+            print("pgvector=available")
+        except KnowledgeUnavailable:
+            print("pgvector=unavailable")
+            return 2
+        try:
+            store.require_schema()
+            print("schema=compatible")
+        except KnowledgeUnavailable:
+            print("schema=incompatible")
             return 2
     else:
         print("postgres=not_configured")
@@ -94,6 +116,7 @@ def _doctor() -> int:
             print("redis=connected")
         except KnowledgeError:
             print("redis=unavailable")
+            return 2
     else:
         print("redis=not_configured")
     return 0

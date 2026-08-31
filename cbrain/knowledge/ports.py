@@ -136,6 +136,86 @@ class CitationLoader(Protocol):
     ) -> tuple[Citation, ...]: ...
 
 
+class KnowledgeStore(Protocol):
+    """Composition of durable knowledge ports used by the runtime."""
+
+    def get_revision(
+        self, tenant_id: str, collection_id: str, source_id: str
+    ) -> DocumentRevision | None: ...
+
+    def list_live_chunks(
+        self,
+        *,
+        tenant_id: str,
+        collection_id: str,
+        principal_id: str,
+    ) -> tuple[KnowledgeChunk, ...]: ...
+
+    def load_chunks(self, chunk_ids: Sequence[str]) -> tuple[KnowledgeChunk, ...]: ...
+
+    def collection_revision(self, tenant_id: str, collection_id: str) -> int: ...
+
+    def embedding_profile(
+        self, tenant_id: str, collection_id: str
+    ) -> EmbeddingProfile | None: ...
+
+    def search_vector(
+        self,
+        *,
+        tenant_id: str,
+        collection_id: str,
+        principal_id: str,
+        vector: tuple[float, ...],
+        limit: int,
+    ) -> tuple[tuple[str, float], ...]: ...
+
+    def search_keyword(
+        self,
+        *,
+        tenant_id: str,
+        collection_id: str,
+        principal_id: str,
+        query: str,
+        limit: int,
+    ) -> tuple[tuple[str, float], ...]: ...
+
+    def upsert_nodes(self, nodes: Sequence[GraphNode]) -> None: ...
+
+    def upsert_edges(self, edges: Sequence[GraphEdge]) -> None: ...
+
+    def traverse(
+        self,
+        *,
+        tenant_id: str,
+        principal_id: str,
+        seed_node_ids: Sequence[str],
+        max_depth: int,
+        max_nodes: int,
+    ) -> tuple[GraphPath, ...]: ...
+
+    def nodes_for_chunks(self, chunk_ids: Sequence[str]) -> tuple[GraphNode, ...]: ...
+
+    def publish_revision(
+        self,
+        *,
+        document: SourceDocument,
+        revision: DocumentRevision,
+        chunks: Sequence[KnowledgeChunk],
+        embeddings: Mapping[str, tuple[float, ...]],
+        nodes: Sequence[GraphNode],
+        edges: Sequence[GraphEdge],
+        profile: EmbeddingProfile,
+    ) -> int: ...
+
+    def tombstone(
+        self, tenant_id: str, collection_id: str, source_id: str, created_at: float
+    ) -> int: ...
+
+    def citations_for(
+        self, chunks: Sequence[KnowledgeChunk]
+    ) -> tuple[Citation, ...]: ...
+
+
 __all__ = [
     "CitationLoader",
     "DocumentRepository",
@@ -146,6 +226,7 @@ __all__ = [
     "KeywordIndex",
     "KnowledgeContextProvider",
     "KnowledgePublisher",
+    "KnowledgeStore",
     "Reranker",
     "VectorIndex",
 ]
