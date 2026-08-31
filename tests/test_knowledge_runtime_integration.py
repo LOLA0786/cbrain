@@ -270,7 +270,8 @@ def test_live_redis_hit_miss_outage_malformed_and_invalidation(
     client = redis.Redis.from_url(redis_dsn)
     keys = list(client.scan_iter(match="cbrain:knowledge:v1:*"))
     assert keys
-    client.set(keys[0], b"not-json")
+    for key in keys:
+        client.set(key, b"not-json")
     malformed = runtime.retrieve(_query(tenant))
     assert malformed.hits
     assert malformed.diagnostics.cache_hit is False
