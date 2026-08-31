@@ -10,6 +10,7 @@ from types import MappingProxyType
 from typing import Any
 
 from cbrain.contracts import ActionIntent, ContractError, ExecutionStatus
+from cbrain.knowledge.errors import KnowledgeUnavailable
 from cbrain.models import (
     CompletionRequest,
     Message,
@@ -69,6 +70,7 @@ class FoundationAgent:
         cancelled: Callable[[], bool] | None = None,
         run_store: RunStore | None = None,
         wall_clock: Callable[[], float] | None = None,
+        knowledge: Any | None = None,
     ) -> None:
         self._profile = profile
         self._runtime = runtime
@@ -83,6 +85,7 @@ class FoundationAgent:
         )
         self._cancelled = cancelled or (lambda: False)
         self._run_store = run_store
+        self._knowledge = knowledge
         self._validate_handlers()
 
     def run(self, run_input: RunInput) -> RunResult:
@@ -116,6 +119,9 @@ class FoundationAgent:
             Message(role=MessageRole.SYSTEM, content=self._profile.instructions),
             Message(role=MessageRole.USER, content=run_input.task),
         ]
+        knowledge_message, knowledge_tools_blocked = self._knowledge_context(run_input)
+        if knowledge_message is not None:
+            messages.append(knowledge_message)
         tool_calls = 0
         model_turns = 0
 
@@ -297,6 +303,18 @@ class FoundationAgent:
 
             tool = self._tools.get(output.name)
             request_id = self._request_id_factory(run_id, step)
+            if knowledge_tools_blocked:
+                return self._failed(
+                    run_id=run_id,
+                    status=RunStatus.TOOL_FAILURE,
+                    events=events,
+                    metadata=self._metadata(
+                        run_input,
+                        reason="KNOWLEDGE_UNAVAILABLE",
+                    ),
+                    tool_calls=tool_calls,
+                    model_turns=model_turns,
+                )
             try:
                 action = ActionIntent.capture(
                     agent_id=self._profile.agent_id,
@@ -504,6 +522,9 @@ class FoundationAgent:
             return initialized
 
         ctx = initialized
+        knowledge_message, knowledge_tools_blocked = self._knowledge_context(run_input)
+        if knowledge_message is not None:
+            ctx.messages.append(knowledge_message)
         try:
             tool_definitions = self._tools.definitions_for(
                 self._profile.permitted_tools
@@ -657,6 +678,7 @@ class FoundationAgent:
                 now=now,
                 resume_completed=tool_resume_completed,
                 resume_prepared=tool_resume_prepared,
+                knowledge_tools_blocked=knowledge_tools_blocked,
             )
             if isinstance(tool_result, RunResult):
                 return tool_result
@@ -685,6 +707,7 @@ class FoundationAgent:
         now: float,
         resume_completed: bool,
         resume_prepared: bool,
+        knowledge_tools_blocked: bool = False,
     ) -> DurableRunContext | RunResult:
         assert self._run_store is not None
         limits = self._profile.limits
@@ -697,6 +720,15 @@ class FoundationAgent:
             execution = restore_execution(ctx.record)
         else:
             if not resume_prepared:
+                if knowledge_tools_blocked:
+                    return self._persist_terminal(
+                        ctx,
+                        status=RunStatus.TOOL_FAILURE,
+                        metadata=self._metadata(
+                            run_input,
+                            reason="KNOWLEDGE_UNAVAILABLE",
+                        ),
+                    )
                 try:
                     action = ActionIntent.capture(
                         agent_id=self._profile.agent_id,
@@ -914,6 +946,41 @@ class FoundationAgent:
         )
         saved = self._run_store.save(terminal, expected_version=ctx.record.version)
         return record_to_run_result(saved)
+
+    def _knowledge_context(self, run_input: RunInput) -> tuple[Message | None, bool]:
+        if self._knowledge is None:
+            return None, False
+        metadata = dict(run_input.metadata or {})
+        tenant_id = metadata.get("tenant_id")
+        collection_id = metadata.get("collection_id")
+        principal_id = metadata.get("principal_id")
+        required = self._profile.knowledge_required_for_tools
+        if not all(
+            isinstance(value, str) and value.strip()
+            for value in (tenant_id, collection_id, principal_id)
+        ):
+            return None, required
+        from cbrain.knowledge.contracts import RetrievalQuery
+
+        try:
+            context = self._knowledge.retrieve(
+                RetrievalQuery(
+                    tenant_id=str(tenant_id),
+                    collection_id=str(collection_id),
+                    principal_id=str(principal_id),
+                    text=run_input.task,
+                    top_k=4,
+                    created_at=self._wall_clock(),
+                )
+            )
+        except KnowledgeUnavailable:
+            return None, required
+        except Exception:
+            return None, required
+        return (
+            Message(role=MessageRole.USER, content=context.quoted_evidence),
+            False,
+        )
 
     def _validate_handlers(self) -> None:
         missing = sorted(self._profile.permitted_tools - set(self._handlers))

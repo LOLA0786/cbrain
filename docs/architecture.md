@@ -115,6 +115,11 @@ cbrain/                      Python package (import cbrain)
 │   ├── instrumented.py      Usage/latency wrappers for eval
 │   └── usage.py             Token accounting
 │
+├── knowledge/               Untrusted RAG/graph context (never authority)
+│   ├── contracts.py / ports.py
+│   ├── ingestion.py / retrieval.py / graph.py
+│   └── stores/              In-memory, PostgreSQL/pgvector, Redis cache
+│
 ├── agent/                   Reusable bounded reasoning loop
 │   ├── foundation.py        FoundationAgent
 │   ├── profile.py           Identity, instructions, limits, tool allow-list

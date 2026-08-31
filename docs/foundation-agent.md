@@ -17,6 +17,13 @@ PrivateVault remains optional. Wire any object that satisfies
 `PrivateVaultGateway` into `GovernedRuntime`. The foundation agent never imports
 PrivateVault or `agent_dna`.
 
+An optional `KnowledgeContextProvider` may attach retrieved excerpts as quoted
+`UNTRUSTED_SOURCE_CONTEXT`. Retrieved knowledge is context, not authority. All
+consequential actions remain subject to CBrain invariants, PrivateVault
+authorization, atomic consumption, exact-byte sidecar dispatch, and verified
+closure. If `knowledge_required_for_tools` is true and retrieval is unavailable,
+the loop must not capture or execute an `ActionIntent`.
+
 ## Define a profile
 
 ```python

@@ -1,0 +1,77 @@
+"""Governed knowledge runtime: untrusted context, never authority."""
+
+from .configuration import KnowledgeConfig
+from .contracts import (
+    KNOWLEDGE_SCHEMA_VERSION,
+    UNTRUSTED_SOURCE_CONTEXT,
+    CacheKey,
+    Citation,
+    DocumentRevision,
+    EmbeddingProfile,
+    GraphEdge,
+    GraphNode,
+    GraphPath,
+    IngestionResult,
+    KnowledgeChunk,
+    RetrievalDiagnostics,
+    RetrievalHit,
+    RetrievalQuery,
+    RetrievedContext,
+    SourceDocument,
+)
+from .errors import KnowledgeConfigError, KnowledgeError, KnowledgeUnavailable
+from .ports import (
+    DocumentRepository,
+    EmbeddingProvider,
+    EntityRelationExtractor,
+    GraphRepository,
+    KeywordIndex,
+    KnowledgeContextProvider,
+    KVCache,
+    Reranker,
+    VectorIndex,
+)
+from .runtime import KnowledgeRuntime
+from .stores.memory import (
+    DeterministicEmbeddingProvider,
+    InMemoryKnowledgeStore,
+    InMemoryKVCache,
+    RuleBasedExtractor,
+)
+
+__all__ = [
+    "KNOWLEDGE_SCHEMA_VERSION",
+    "UNTRUSTED_SOURCE_CONTEXT",
+    "CacheKey",
+    "Citation",
+    "DeterministicEmbeddingProvider",
+    "DocumentRepository",
+    "DocumentRevision",
+    "EmbeddingProfile",
+    "EmbeddingProvider",
+    "EntityRelationExtractor",
+    "GraphEdge",
+    "GraphNode",
+    "GraphPath",
+    "GraphRepository",
+    "InMemoryKVCache",
+    "InMemoryKnowledgeStore",
+    "IngestionResult",
+    "KVCache",
+    "KeywordIndex",
+    "KnowledgeChunk",
+    "KnowledgeConfig",
+    "KnowledgeConfigError",
+    "KnowledgeContextProvider",
+    "KnowledgeError",
+    "KnowledgeRuntime",
+    "KnowledgeUnavailable",
+    "Reranker",
+    "RetrievedContext",
+    "RetrievalDiagnostics",
+    "RetrievalHit",
+    "RetrievalQuery",
+    "RuleBasedExtractor",
+    "SourceDocument",
+    "VectorIndex",
+]

@@ -13,6 +13,7 @@ dependencies = []
 cbrain-eval = "cbrain.evaluation.cli:main"
 cbrain-hermes = "cbrain.hermes_launcher:main"
 cbrain-insights = "cbrain.agent.insights_cli:main"
+cbrain-knowledge = "cbrain.knowledge_cli:main"
 
 [project.optional-dependencies]
 dev = [
