@@ -6,6 +6,7 @@ import math
 from typing import Any
 
 import pytest
+from knowledge_fakes import DeterministicEmbeddingProvider, RuleBasedExtractor
 
 from cbrain import GovernedRuntime
 from cbrain.agent import (
@@ -121,9 +122,33 @@ def _document(
 
 
 def _runtime(**overrides: Any) -> KnowledgeRuntime:
-    payload = {"clock": lambda: NOW}
+    payload: dict[str, Any] = {
+        "clock": lambda: NOW,
+        "embeddings": DeterministicEmbeddingProvider(),
+        "extractor": RuleBasedExtractor(),
+    }
     payload.update(overrides)
     return KnowledgeRuntime(**payload)
+
+
+def test_knowledge_runtime_requires_embeddings_and_extractor() -> None:
+    with pytest.raises(TypeError, match="embeddings"):
+        KnowledgeRuntime(clock=lambda: NOW)
+    with pytest.raises(TypeError, match="extractor"):
+        KnowledgeRuntime(
+            clock=lambda: NOW,
+            embeddings=DeterministicEmbeddingProvider(),
+        )
+
+
+def test_embedding_fakes_are_not_exported_from_production_package() -> None:
+    import cbrain.knowledge as knowledge
+    import cbrain.knowledge.stores.memory as memory
+
+    assert not hasattr(knowledge, "DeterministicEmbeddingProvider")
+    assert not hasattr(knowledge, "RuleBasedExtractor")
+    assert not hasattr(memory, "DeterministicEmbeddingProvider")
+    assert not hasattr(memory, "RuleBasedExtractor")
 
 
 def _query(
@@ -563,10 +588,36 @@ def test_knowledge_cli_doctor_does_not_print_secrets(
     assert "knowledge configuration is valid" in output
 
 
+def test_knowledge_cli_refuses_to_construct_runtime_without_providers(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert (
+        knowledge_main(
+            (
+                "query",
+                "--tenant-id",
+                "t",
+                "--collection-id",
+                "c",
+                "--principal-id",
+                "p",
+                "--text",
+                "Alice",
+            )
+        )
+        == 2
+    )
+    assert "embeddings and extractor must be injected" in capsys.readouterr().err
+
+
 def test_runtime_factories_and_protocol_store() -> None:
-    memory = KnowledgeRuntime.in_memory(clock=lambda: NOW)
+    fakes = {
+        "embeddings": DeterministicEmbeddingProvider(),
+        "extractor": RuleBasedExtractor(),
+    }
+    memory = KnowledgeRuntime.in_memory(clock=lambda: NOW, **fakes)
     assert memory.ingest(_document(text="Alice works at Acme.")).published is True
-    from_config = KnowledgeRuntime.from_config(clock=lambda: NOW)
+    from_config = KnowledgeRuntime.from_config(clock=lambda: NOW, **fakes)
     assert (
         from_config.ingest(_document(text="Alice works at Acme.")).source_revision == 1
     )
@@ -597,6 +648,7 @@ def test_runtime_factories_and_protocol_store() -> None:
                 max_context_tokens=512,
             ),
             production=True,
+            **fakes,
         )
 
 

@@ -24,11 +24,9 @@ from .ingestion import IngestionPipeline
 from .ports import EmbeddingProvider, EntityRelationExtractor, KnowledgeStore, KVCache
 from .retrieval import HybridRetriever
 from .stores.memory import (
-    DeterministicEmbeddingProvider,
     InMemoryKnowledgeStore,
     InMemoryKVCache,
     NullKVCache,
-    RuleBasedExtractor,
 )
 
 
@@ -39,15 +37,15 @@ class KnowledgeRuntime:
         config: KnowledgeConfig | None = None,
         store: KnowledgeStore | None = None,
         cache: KVCache | None = None,
-        embeddings: EmbeddingProvider | None = None,
-        extractor: EntityRelationExtractor | None = None,
+        embeddings: EmbeddingProvider,
+        extractor: EntityRelationExtractor,
         clock: Callable[[], float] | None = None,
     ) -> None:
         self.config = config or default_knowledge_config()
         self.store = store or InMemoryKnowledgeStore()
         self.cache = cache or InMemoryKVCache()
-        self.embeddings = embeddings or DeterministicEmbeddingProvider()
-        self.extractor = extractor or RuleBasedExtractor()
+        self.embeddings = embeddings
+        self.extractor = extractor
         self._clock = clock or time.time
         self.pipeline = IngestionPipeline(
             store=self.store,
@@ -69,8 +67,8 @@ class KnowledgeRuntime:
         cls,
         *,
         config: KnowledgeConfig | None = None,
-        embeddings: EmbeddingProvider | None = None,
-        extractor: EntityRelationExtractor | None = None,
+        embeddings: EmbeddingProvider,
+        extractor: EntityRelationExtractor,
         clock: Callable[[], float] | None = None,
         store: KnowledgeStore | None = None,
         cache: KVCache | None = None,
@@ -90,8 +88,8 @@ class KnowledgeRuntime:
         config: KnowledgeConfig | None = None,
         *,
         production: bool = False,
-        embeddings: EmbeddingProvider | None = None,
-        extractor: EntityRelationExtractor | None = None,
+        embeddings: EmbeddingProvider,
+        extractor: EntityRelationExtractor,
         clock: Callable[[], float] | None = None,
         store: KnowledgeStore | None = None,
         cache: KVCache | None = None,

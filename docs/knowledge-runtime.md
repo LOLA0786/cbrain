@@ -40,8 +40,11 @@ unavailable durable knowledge prevents consequential tool execution before an
 `KnowledgeRuntime`, ingestion, retrieval, and graph traversal depend on the
 `KnowledgeStore` and `KVCache` ports. Constructors:
 
-- `KnowledgeRuntime.in_memory(...)` for deterministic unit tests
-- `KnowledgeRuntime.from_config(...)` for deployment-owned adapters
+- `KnowledgeRuntime.in_memory(..., embeddings=..., extractor=...)` for
+  deterministic unit tests that inject test doubles
+- `KnowledgeRuntime.from_config(..., embeddings=..., extractor=...)` for
+  deployment-owned adapters. Embeddings and extractor are required keyword
+  arguments; they are never defaulted to test fakes.
 
 External services are not contacted during module import. `from_config` uses
 PostgreSQL when `postgres_dsn` is set or `CBRAIN_KNOWLEDGE_MODE=production`.
@@ -55,7 +58,7 @@ Production mode without a PostgreSQL DSN fails closed.
 4. Content digest and deterministic chunk IDs
    (`tenant_id + source_id + source_revision + chunk_index + normalized_text_digest`).
 5. Idempotent re-ingestion of the same revision.
-6. Injected `EmbeddingProvider` (unit tests use `DeterministicEmbeddingProvider`).
+6. Injected `EmbeddingProvider` (unit tests use `tests.knowledge_fakes.DeterministicEmbeddingProvider`).
 7. Rule-based entity/relation extraction (not verified facts).
 8. One PostgreSQL transaction publishes collection lock/profile, document,
    chunks, embeddings, graph nodes/edges, collection revision, and ingestion-job
