@@ -1,4 +1,8 @@
-"""Risk-based governed gateway for company agents."""
+"""Company eval/fixture policy gateway.
+
+This is the `company_test_gateway` decision authority. It is not PrivateVault
+and must not be imported by production adapters, execution, or the agent loop.
+"""
 
 from __future__ import annotations
 
@@ -6,18 +10,18 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from cbrain import ActionIntent, ExecutionStatus, GovernedExecution
-
-from .authority import CompanyExecutionContext
-from .risk import ToolRiskLevel
-from .simulators import CompanySimulatorBundle
-from .spec import CompanyAgentSpec
-from .validation import validate_company_action
+from cbrain.company.authority import CompanyExecutionContext
+from cbrain.company.risk import ToolRiskLevel
+from cbrain.company.simulators import CompanySimulatorBundle
+from cbrain.company.spec import CompanyAgentSpec
+from cbrain.company.validation import validate_company_action
 
 
 class CompanyRiskGateway:
     """Maps tool risk and argument validation to ALLOW, REVIEW, or BLOCK."""
 
     independent_execution = False
+    decision_authority = "company_test_gateway"
 
     def __init__(
         self,

@@ -19,13 +19,13 @@ from cbrain.agent import FoundationAgent, RunInput, RunStatus
 from cbrain.agent.durable import DurableRunState
 from cbrain.agent.store_memory import InMemoryRunStore
 from cbrain.company.authority import CompanyExecutionContext
-from cbrain.company.governance import CompanyRiskGateway
 from cbrain.company.handlers import build_handlers
 from cbrain.company.kinds import CompanyAgentKind
 from cbrain.company.profiles import spec_for_kind
 from cbrain.company.simulators import CompanySimulatorBundle, load_fixture_bundle
 from cbrain.company.spec import CompanyAgentSpec
 from cbrain.company.validation import validate_company_action
+from cbrain.evaluation.company_gateway import CompanyRiskGateway
 from cbrain.models import FIVE_PROVIDER_ROUTES, ModelRouter, TextOutput, ToolCall
 from cbrain.models.instrumented import InstrumentedModelAdapter
 from cbrain.models.usage import TokenUsage, aggregate_usage

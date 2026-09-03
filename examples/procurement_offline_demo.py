@@ -11,7 +11,7 @@ from cbrain.company.approval import (
     ApprovalPrincipal,
     ApprovalRole,
 )
-from cbrain.company.governance import CompanyRiskGateway
+from cbrain.evaluation.company_gateway import CompanyRiskGateway
 from cbrain.company.handlers import build_handlers
 from cbrain.company.kinds import CompanyAgentKind
 from cbrain.company.profiles import spec_for_kind

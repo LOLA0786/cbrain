@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 
 from cbrain.agent import ToolRegistry, ToolRegistryError
-from cbrain.company.governance import CompanyRiskGateway
 from cbrain.company.handlers import build_handlers
 from cbrain.company.kinds import MATRIX_AGENT_KINDS, CompanyAgentKind
 from cbrain.company.profiles import all_company_profiles, spec_for_kind
@@ -18,6 +17,7 @@ from cbrain.company.simulators import SimulatorValidationError, load_fixture_bun
 from cbrain.company.spec import SCENARIO_SUITE_VERSION
 from cbrain.evaluation.cli import main
 from cbrain.evaluation.company_gates import evaluate_release_gates
+from cbrain.evaluation.company_gateway import CompanyRiskGateway
 from cbrain.evaluation.company_harness import CompanyEvalHarness
 from cbrain.evaluation.company_scenarios import (
     SCENARIOS_PER_AGENT,

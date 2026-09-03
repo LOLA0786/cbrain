@@ -27,11 +27,11 @@ from cbrain.company.approval import (
     ApprovalRole,
 )
 from cbrain.company.authority import CompanyExecutionContext
-from cbrain.company.governance import CompanyRiskGateway
 from cbrain.company.handlers import build_handlers
 from cbrain.company.kinds import CompanyAgentKind
 from cbrain.company.profiles import spec_for_kind
 from cbrain.company.simulators import load_fixture_bundle
+from cbrain.evaluation.company_gateway import CompanyRiskGateway
 from cbrain.evaluation.company_harness import canonical_action_intent_digest
 from cbrain.evaluation.company_scenarios import ExpectedDecision
 

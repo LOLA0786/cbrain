@@ -24,7 +24,6 @@ from cbrain.company.approval import (
     ApprovalInbox,
     ApprovalRole,
 )
-from cbrain.company.governance import CompanyRiskGateway
 from cbrain.company.handlers import build_handlers
 from cbrain.company.kinds import CompanyAgentKind
 from cbrain.company.profiles import spec_for_kind
@@ -33,6 +32,7 @@ from cbrain.company.simulators import load_fixture_bundle
 from cbrain.company.spec import CompanyAgentSpec, build_company_spec
 from cbrain.contracts import ActionIntent, GovernedExecution
 from cbrain.dispatch import PreparedDispatch
+from cbrain.evaluation.company_gateway import CompanyRiskGateway
 from cbrain.evaluation.company_harness import canonical_action_intent_digest
 from cbrain.procurement import (
     BUYER_PROFILE,

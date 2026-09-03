@@ -134,12 +134,12 @@ cbrain/                      Python package (import cbrain)
 │   ├── profiles.py, tools.py, spec.py, risk.py
 │   ├── authority.py         CompanyExecutionContext (legal matter scope)
 │   ├── validation.py        Money/legal checks before REVIEW
-│   ├── governance.py        CompanyRiskGateway (eval / fixture policy)
 │   ├── handlers.py          Simulator-backed tool handlers
 │   └── simulators.py        Fixture bundles
 │
 ├── simulators/              Mutable CRM + ledger — business rules only
 ├── evaluation/              Deterministic catalogs, harnesses, CLI
+│   └── company_gateway.py   CompanyRiskGateway (company_test_gateway)
 └── deploy/                  JSON deployment config (fail at startup)
 
 integrations/hermes/cbrain_guard/   Packaged Hermes plugin
