@@ -1,0 +1,208 @@
+{
+  "quote_validity_hours": 168,
+  "gst_rate": "0.18",
+  "grades": ["Fe500D", "Fe550D", "HRC"],
+  "payment_terms": ["ADVANCE", "NET_15", "NET_30", "NET_45", "LC_SIGHT"],
+  "vendors": [
+    {
+      "vendor_id": "v-kalika",
+      "legal_name": "Kalika Steel Traders Pvt Ltd",
+      "gstin": "27AABCK1111A1Z5",
+      "origin_city": "Kalamboli",
+      "approved": true,
+      "onboarded_at": "2022-01-15T00:00:00Z",
+      "bank_beneficiary_id": "bnf-kalika",
+      "moq_tonnes": "20",
+      "freight_per_tonne": "320.00",
+      "rates": {
+        "Fe500D": "48500.00",
+        "Fe550D": "49800.00",
+        "HRC": "51200.00"
+      },
+      "default_payment_terms": "ADVANCE",
+      "reliability": {
+        "orders_total": 140,
+        "on_time_pct": "51.20",
+        "short_delivery_pct": "18.40",
+        "quality_rejection_pct": "9.10",
+        "avg_delay_days": "6.50",
+        "last_dispute_at": "2026-02-20T00:00:00Z"
+      }
+    },
+    {
+      "vendor_id": "v-jsw",
+      "legal_name": "JSW Steel Dolvi Depot",
+      "gstin": "27AAACJ2222B1Z1",
+      "origin_city": "Dolvi",
+      "approved": true,
+      "onboarded_at": "2020-06-01T00:00:00Z",
+      "bank_beneficiary_id": "bnf-jsw",
+      "moq_tonnes": "10",
+      "freight_per_tonne": "480.00",
+      "rates": {
+        "Fe500D": "50200.00",
+        "Fe550D": "51400.00",
+        "HRC": "52800.00"
+      },
+      "default_payment_terms": "NET_15",
+      "reliability": {
+        "orders_total": 86,
+        "on_time_pct": "88.40",
+        "short_delivery_pct": "4.10",
+        "quality_rejection_pct": "1.80",
+        "avg_delay_days": "1.20",
+        "last_dispute_at": null
+      }
+    },
+    {
+      "vendor_id": "v-jindal",
+      "legal_name": "Jindal Shadeed Vasind Yard",
+      "gstin": "27AADCJ3333C1Z8",
+      "origin_city": "Vasind",
+      "approved": true,
+      "onboarded_at": "2019-11-12T00:00:00Z",
+      "bank_beneficiary_id": "bnf-jindal",
+      "moq_tonnes": "10",
+      "freight_per_tonne": "510.00",
+      "rates": {
+        "Fe500D": "50800.00",
+        "Fe550D": "51950.00",
+        "HRC": "53100.00"
+      },
+      "default_payment_terms": "NET_30",
+      "reliability": {
+        "orders_total": 64,
+        "on_time_pct": "84.10",
+        "short_delivery_pct": "5.60",
+        "quality_rejection_pct": "2.40",
+        "avg_delay_days": "1.80",
+        "last_dispute_at": "2025-11-02T00:00:00Z"
+      }
+    },
+    {
+      "vendor_id": "v-bhiwandi",
+      "legal_name": "Bhiwandi TMT Distributors LLP",
+      "gstin": "27AADFB4444D1Z2",
+      "origin_city": "Bhiwandi",
+      "approved": true,
+      "onboarded_at": "2018-03-20T00:00:00Z",
+      "bank_beneficiary_id": "bnf-bhiwandi",
+      "moq_tonnes": "10",
+      "freight_per_tonne": "290.00",
+      "rates": {
+        "Fe500D": "52100.00",
+        "Fe550D": "53400.00",
+        "HRC": "54800.00"
+      },
+      "default_payment_terms": "NET_45",
+      "reliability": {
+        "orders_total": 210,
+        "on_time_pct": "97.30",
+        "short_delivery_pct": "1.10",
+        "quality_rejection_pct": "0.40",
+        "avg_delay_days": "0.20",
+        "last_dispute_at": null
+      }
+    },
+    {
+      "vendor_id": "v-raigad",
+      "legal_name": "Raigad Rolling Mills Pvt Ltd",
+      "gstin": "27AABCR5555E1Z9",
+      "origin_city": "Raigad",
+      "approved": true,
+      "onboarded_at": "2021-08-08T00:00:00Z",
+      "bank_beneficiary_id": "bnf-raigad",
+      "moq_tonnes": "12",
+      "freight_per_tonne": "620.00",
+      "rates": {
+        "Fe500D": "49900.00",
+        "Fe550D": "51100.00",
+        "HRC": "52500.00"
+      },
+      "default_payment_terms": "LC_SIGHT",
+      "reliability": {
+        "orders_total": 73,
+        "on_time_pct": "91.00",
+        "short_delivery_pct": "3.20",
+        "quality_rejection_pct": "1.50",
+        "avg_delay_days": "0.90",
+        "last_dispute_at": null
+      }
+    },
+    {
+      "vendor_id": "v-hazira",
+      "legal_name": "Hazira Coil Stockists",
+      "gstin": "24AADCH6666F1Z3",
+      "origin_city": "Hazira",
+      "approved": true,
+      "onboarded_at": "2017-04-01T00:00:00Z",
+      "bank_beneficiary_id": "bnf-hazira",
+      "moq_tonnes": "15",
+      "freight_per_tonne": "1450.00",
+      "rates": {
+        "Fe500D": "49000.00",
+        "Fe550D": "50300.00",
+        "HRC": "49900.00"
+      },
+      "default_payment_terms": "NET_30",
+      "reliability": {
+        "orders_total": 55,
+        "on_time_pct": "86.70",
+        "short_delivery_pct": "4.80",
+        "quality_rejection_pct": "2.10",
+        "avg_delay_days": "1.40",
+        "last_dispute_at": "2025-09-18T00:00:00Z"
+      }
+    },
+    {
+      "vendor_id": "v-bhilai",
+      "legal_name": "Bhilai Steel House Mumbai Desk",
+      "gstin": "22AABCB7777G1Z6",
+      "origin_city": "Bhilai",
+      "approved": true,
+      "onboarded_at": "2016-12-11T00:00:00Z",
+      "bank_beneficiary_id": null,
+      "moq_tonnes": "25",
+      "freight_per_tonne": "2650.00",
+      "rates": {
+        "Fe500D": "47800.00",
+        "Fe550D": "48900.00",
+        "HRC": "50500.00"
+      },
+      "default_payment_terms": "ADVANCE",
+      "reliability": {
+        "orders_total": 41,
+        "on_time_pct": "79.50",
+        "short_delivery_pct": "7.90",
+        "quality_rejection_pct": "3.60",
+        "avg_delay_days": "2.70",
+        "last_dispute_at": "2026-01-09T00:00:00Z"
+      }
+    },
+    {
+      "vendor_id": "v-grey",
+      "legal_name": "Harbour Lane Steel Brokers",
+      "gstin": "27AADFG8888H1Z4",
+      "origin_city": "Mumbai",
+      "approved": false,
+      "onboarded_at": "2026-02-28T00:00:00Z",
+      "bank_beneficiary_id": "bnf-grey-new",
+      "moq_tonnes": "8",
+      "freight_per_tonne": "400.00",
+      "rates": {
+        "Fe500D": "50000.00",
+        "Fe550D": "51000.00",
+        "HRC": "52000.00"
+      },
+      "default_payment_terms": "ADVANCE",
+      "reliability": {
+        "orders_total": 4,
+        "on_time_pct": "80.00",
+        "short_delivery_pct": "8.00",
+        "quality_rejection_pct": "5.00",
+        "avg_delay_days": "3.00",
+        "last_dispute_at": null
+      }
+    }
+  ]
+}

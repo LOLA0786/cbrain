@@ -35,11 +35,9 @@ from .ports import (
 )
 from .runtime import KnowledgeRuntime
 from .stores.memory import (
-    DeterministicEmbeddingProvider,
     InMemoryKnowledgeStore,
     InMemoryKVCache,
     NullKVCache,
-    RuleBasedExtractor,
 )
 
 __all__ = [
@@ -48,7 +46,6 @@ __all__ = [
     "UNTRUSTED_SOURCE_CONTEXT",
     "CacheKey",
     "Citation",
-    "DeterministicEmbeddingProvider",
     "DocumentRepository",
     "DocumentRevision",
     "EmbeddingProfile",
@@ -77,7 +74,6 @@ __all__ = [
     "RetrievalDiagnostics",
     "RetrievalHit",
     "RetrievalQuery",
-    "RuleBasedExtractor",
     "SourceDocument",
     "VectorIndex",
 ]

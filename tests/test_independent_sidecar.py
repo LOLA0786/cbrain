@@ -25,7 +25,7 @@ from cbrain.execution import (
 ZERO = "sha256:" + ("0" * 64)
 ONE = "sha256:" + ("1" * 64)
 WIRE_BYTES = b'{"amount":50000,"beneficiary_id":"vendor-17"}'
-PEER_BYTES = b"tls-cert-sha256:" + (b"a" * 64)
+PEER_BYTES = b"tls-spki-sha256:" + (b"a" * 64)
 SECRET = "pv-sidecar-test-secret"
 
 
@@ -275,7 +275,7 @@ def test_sidecar_sends_exact_authorized_bytes_and_returns_closed_evidence():
 
 
 def test_peer_identity_mismatch_refuses_before_claim_or_send():
-    channel = Channel(b"tls-cert-sha256:" + (b"b" * 64))
+    channel = Channel(b"tls-spki-sha256:" + (b"b" * 64))
     transport, claimant, _, _, closer, _ = make_transport(channel=channel)
 
     with pytest.raises(HandlerNotInvoked, match="pre_dispatch_refused"):
@@ -422,11 +422,6 @@ class NeverLocalClaim:
         raise AssertionError("independent authorization must be claimed by sidecar")
 
 
-class NeverLocalClose:
-    def seal(self, **kwargs):
-        raise AssertionError("independent closure must be signed by sidecar")
-
-
 def test_concrete_gateway_delegates_claim_send_witness_and_close_to_sidecar():
     transport, claimant, channel, _, closer, _ = make_transport()
     gateway = PrivateVaultExecutionGateway(
@@ -436,7 +431,6 @@ def test_concrete_gateway_delegates_claim_send_witness_and_close_to_sidecar():
         claim_coordinator=NeverLocalClaim(),
         verifier=Verifier(),
         transport=transport,
-        closure_writer=NeverLocalClose(),
         clock=lambda: "2026-07-31T12:00:40Z",
         witness_id_factory=lambda action: "witness-1",
     )

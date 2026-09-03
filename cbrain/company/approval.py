@@ -18,8 +18,7 @@ from types import MappingProxyType
 from typing import Any
 
 from cbrain import ActionIntent, ExecutionStatus, GovernedExecution
-
-from .governance import CompanyRiskGateway
+from cbrain.evaluation.company_gateway import CompanyRiskGateway
 
 
 class ApprovalInboxError(ValueError):

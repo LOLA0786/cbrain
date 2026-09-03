@@ -1,11 +1,11 @@
 """The dispatch boundary.
 
 `DispatchTransport` is the seam between a co-located dispatcher and an
-independent one. `InProcessDispatchTransport` runs the tool handler inside the
-agent process; it produces a real signed witness, but the witness attests to
-bytes the same process declared rather than bytes an independent component
-observed leaving the host. A sidecar implementation of this protocol swaps in
-without touching the gateway.
+independent one. `InProcessDispatchTransport` is a unit-test double: it runs
+the tool handler inside the agent process and cannot produce EXECUTED against
+real Agent DNA, because it returns no closure and the gateway will not seal
+one. A sidecar implementation of this protocol swaps in without touching the
+gateway.
 """
 
 from __future__ import annotations
@@ -73,14 +73,14 @@ class DispatchTransport(Protocol):
 
 
 class InProcessDispatchTransport:
-    """Milestone A: dispatch and witness in the agent process.
+    """Unit-test double: dispatch and witness in the agent process.
 
-    The witness signature is real and the digests are computed from the same
-    byte string the permit commits to, so the evidence chain verifies end to
-    end. What it does not establish is independence: nothing here prevents the
-    process from signing a witness for bytes it did not actually transmit.
-    `identity.independent` is False and closure must not be verified with
-    `require_witness_independence=True` against this transport.
+    It cannot produce EXECUTED against real Agent DNA. The witness signature
+    is real and the digests are computed from the same byte string the permit
+    commits to, but this transport returns no closure, and production requires
+    an independent dispatch boundary to seal one. `identity.independent` is
+    False; nothing here prevents the process from signing a witness for bytes
+    it did not actually transmit.
     """
 
     def __init__(

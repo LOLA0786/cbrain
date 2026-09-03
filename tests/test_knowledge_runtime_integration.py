@@ -14,6 +14,7 @@ from dataclasses import replace
 from typing import Any
 
 import pytest
+from knowledge_fakes import DeterministicEmbeddingProvider, RuleBasedExtractor
 
 from cbrain import GovernedRuntime
 from cbrain.agent import (
@@ -103,6 +104,8 @@ def _runtime(postgres: str, redis_dsn: str, **overrides: Any) -> KnowledgeRuntim
     payload = {
         "config": _config(postgres, redis_dsn),
         "clock": lambda: NOW,
+        "embeddings": DeterministicEmbeddingProvider(),
+        "extractor": RuleBasedExtractor(),
     }
     payload.update(overrides)
     return KnowledgeRuntime.from_config(**payload)
@@ -285,6 +288,8 @@ def test_live_redis_hit_miss_outage_malformed_and_invalidation(
     recovered = KnowledgeRuntime.from_config(
         config=_config(postgres, "redis://127.0.0.1:1/0"),
         clock=lambda: NOW,
+        embeddings=DeterministicEmbeddingProvider(),
+        extractor=RuleBasedExtractor(),
     ).retrieve(_query(tenant))
     assert recovered.hits
     assert recovered.diagnostics.cache_hit is False
@@ -346,6 +351,8 @@ def test_live_dimension_and_profile_mismatch_fail_before_mutation(
         KnowledgeRuntime.from_config(
             config=other_profile,
             clock=lambda: NOW,
+            embeddings=DeterministicEmbeddingProvider(),
+            extractor=RuleBasedExtractor(),
         ).ingest(_document(tenant, text="Alice works at Globex.", source_id="other"))
     assert (
         _pg_store(runtime).row_counts(tenant, COLLECTION)["knowledge_documents"]
@@ -595,7 +602,12 @@ def test_live_required_knowledge_failure_prevents_tool_execution() -> None:
         clock=lambda: NOW,
         run_id_factory=lambda: "run-knowledge-live",
         request_id_factory=lambda run_id, step: f"{run_id}-step-{step}",
-        knowledge=KnowledgeRuntime(store=store, clock=lambda: NOW).provider,
+        knowledge=KnowledgeRuntime(
+            store=store,
+            clock=lambda: NOW,
+            embeddings=DeterministicEmbeddingProvider(),
+            extractor=RuleBasedExtractor(),
+        ).provider,
     )
     result = agent.run(
         RunInput(
@@ -618,4 +630,6 @@ def test_production_from_config_without_postgres_fails_closed() -> None:
                 default_knowledge_config(), postgres_dsn=None, redis_dsn=None
             ),
             production=True,
+            embeddings=DeterministicEmbeddingProvider(),
+            extractor=RuleBasedExtractor(),
         )

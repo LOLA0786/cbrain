@@ -10,7 +10,6 @@ import pytest
 
 from cbrain.agent import RunStatus
 from cbrain.company.authority import CompanyExecutionContext
-from cbrain.company.governance import CompanyRiskGateway
 from cbrain.company.handlers import build_handlers
 from cbrain.company.kinds import CompanyAgentKind
 from cbrain.company.profiles import spec_for_kind
@@ -31,6 +30,7 @@ from cbrain.company.simulators import load_fixture_bundle
 from cbrain.contracts import ActionIntent, ExecutionStatus
 from cbrain.evaluation.cli import main
 from cbrain.evaluation.company_gates import ReleaseGateResult, evaluate_release_gates
+from cbrain.evaluation.company_gateway import CompanyRiskGateway
 from cbrain.evaluation.company_harness import (
     CompanyEvalHarness,
     CompanySuiteMetrics,

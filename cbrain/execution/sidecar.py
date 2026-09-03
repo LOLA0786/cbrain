@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import base64
 import binascii
-import hashlib
 import http.client
 import json
 import os
@@ -28,6 +27,7 @@ from urllib.parse import urlsplit
 from cbrain.adapters.privatevault_execution import ExecutionAuthorizationBinding
 from cbrain.dispatch import PreparedDispatch
 from cbrain.execution.gateway import ClosureWriter
+from cbrain.execution.tls import PeerIdentityError, peer_identity_from_der_certificate
 from cbrain.execution.transport import (
     DispatchResult,
     DispatchTransportError,
@@ -541,16 +541,24 @@ class _PinnedHTTPSChannel:
             timeout=timeout_seconds,
             context=ssl_context,
         )
-        self._connection.connect()
-        socket = self._connection.sock
-        if socket is None:
-            raise SidecarError("target TLS connection has no peer socket")
-        certificate = socket.getpeercert(binary_form=True)
-        if not certificate:
-            raise SidecarError("target TLS peer certificate is unavailable")
-        self.peer_identity_bytes = (
-            f"tls-cert-sha256:{hashlib.sha256(certificate).hexdigest()}".encode()
-        )
+        try:
+            self._connection.connect()
+            socket = self._connection.sock
+            if socket is None:
+                raise SidecarError("target TLS connection has no peer socket")
+            certificate = socket.getpeercert(binary_form=True)
+            if not isinstance(certificate, bytes) or not certificate:
+                raise SidecarError("target TLS peer certificate is unavailable")
+            try:
+                self.peer_identity_bytes = peer_identity_from_der_certificate(
+                    certificate
+                ).encode("ascii")
+            except PeerIdentityError as exc:
+                raise SidecarError("target TLS peer identity is unreadable") from exc
+        except BaseException:
+            with suppress(Exception):
+                self._connection.close()
+            raise
 
     def send_exact(
         self,
@@ -591,24 +599,62 @@ def serve_sidecar(
     host: str,
     port: int,
     ssl_context: ssl.SSLContext,
+    allowed_client_principals: frozenset[str],
     max_request_bytes: int = 8 * 1024 * 1024,
 ) -> None:
     """Serve the dispatcher over TLS; configure mTLS on ``ssl_context``."""
 
+    server = bind_sidecar_server(
+        service=service,
+        host=host,
+        port=port,
+        ssl_context=ssl_context,
+        allowed_client_principals=allowed_client_principals,
+        max_request_bytes=max_request_bytes,
+    )
+    try:
+        server.serve_forever()
+    finally:
+        server.server_close()
+
+
+def bind_sidecar_server(
+    *,
+    service: SidecarDispatchService,
+    host: str,
+    port: int,
+    ssl_context: ssl.SSLContext,
+    allowed_client_principals: frozenset[str],
+    max_request_bytes: int = 8 * 1024 * 1024,
+) -> ThreadingHTTPServer:
     if ssl_context.verify_mode != ssl.CERT_REQUIRED:
         raise ValueError("sidecar server must require a verified client certificate")
+    allowed = frozenset(
+        principal for principal in allowed_client_principals if principal.strip()
+    )
+    if not allowed:
+        raise ValueError("sidecar server must allow-list client certificate principals")
 
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self) -> None:  # noqa: N802
+            if not _client_principal_allowed(self.connection, allowed):
+                self.send_response(403)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             if self.path != "/v1/dispatch":
                 self.send_error(404)
                 return
-            length = _content_length(self.headers.get("Content-Length"))
-            if length > max_request_bytes:
-                self.send_error(413)
-                return
-            body = self.rfile.read(length)
             try:
+                length = _content_length(self.headers.get("Content-Length"))
+            except SidecarProtocolError:
+                self.send_error(411)
+                return
+            try:
+                if length > max_request_bytes:
+                    self.send_error(413)
+                    return
+                body = self.rfile.read(length)
                 payload = _required_mapping(json.loads(body), "sidecar request")
                 response = service.handle(payload)
                 encoded = _canonical_json(response)
@@ -628,10 +674,53 @@ def serve_sidecar(
 
     server = ThreadingHTTPServer((host, port), Handler)
     server.socket = ssl_context.wrap_socket(server.socket, server_side=True)
+    return server
+
+
+def _client_principal_allowed(
+    connection: object, allowed_client_principals: frozenset[str]
+) -> bool:
+    getpeercert = getattr(connection, "getpeercert", None)
+    if not callable(getpeercert):
+        return False
     try:
-        server.serve_forever()
-    finally:
-        server.server_close()
+        certificate = getpeercert()
+    except Exception:
+        return False
+    return not _principals_from_peercert(certificate).isdisjoint(
+        allowed_client_principals
+    )
+
+
+def _principals_from_peercert(certificate: object) -> frozenset[str]:
+    if not isinstance(certificate, Mapping):
+        return frozenset()
+    names: set[str] = set()
+    subject = certificate.get("subject") or ()
+    if isinstance(subject, tuple):
+        for rdn in subject:
+            if not isinstance(rdn, tuple):
+                continue
+            for item in rdn:
+                if (
+                    isinstance(item, tuple)
+                    and len(item) == 2
+                    and item[0] == "commonName"
+                    and isinstance(item[1], str)
+                    and item[1].strip()
+                ):
+                    names.add(item[1])
+    alt_names = certificate.get("subjectAltName") or ()
+    if isinstance(alt_names, tuple):
+        for item in alt_names:
+            if (
+                isinstance(item, tuple)
+                and len(item) == 2
+                and isinstance(item[1], str)
+                and item[1].strip()
+            ):
+                names.add(item[1])
+    return frozenset(names)
 
 
 def _encode_request(
@@ -877,5 +966,6 @@ __all__ = [
     "TargetChannel",
     "TargetConnector",
     "TargetResponse",
+    "bind_sidecar_server",
     "serve_sidecar",
 ]

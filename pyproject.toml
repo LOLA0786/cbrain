@@ -14,9 +14,11 @@ cbrain-eval = "cbrain.evaluation.cli:main"
 cbrain-hermes = "cbrain.hermes_launcher:main"
 cbrain-insights = "cbrain.agent.insights_cli:main"
 cbrain-knowledge = "cbrain.knowledge_cli:main"
+cbrain-spki = "cbrain.execution.spki_cli:main"
 
 [project.optional-dependencies]
 dev = [
+  "cryptography>=43",
   "mypy>=1.15",
   "pytest>=8.3,<10",
   "pytest-cov>=6",
@@ -42,6 +44,9 @@ knowledge = [
 where = ["."]
 include = ["cbrain*"]
 exclude = ["tests*"]
+
+[tool.setuptools.package-data]
+"cbrain.simulators.catalog" = ["*.json"]
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-config --strict-markers"

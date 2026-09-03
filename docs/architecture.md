@@ -134,12 +134,12 @@ cbrain/                      Python package (import cbrain)
 │   ├── profiles.py, tools.py, spec.py, risk.py
 │   ├── authority.py         CompanyExecutionContext (legal matter scope)
 │   ├── validation.py        Money/legal checks before REVIEW
-│   ├── governance.py        CompanyRiskGateway (eval / fixture policy)
 │   ├── handlers.py          Simulator-backed tool handlers
 │   └── simulators.py        Fixture bundles
 │
 ├── simulators/              Mutable CRM + ledger — business rules only
 ├── evaluation/              Deterministic catalogs, harnesses, CLI
+│   └── company_gateway.py   CompanyRiskGateway (company_test_gateway)
 └── deploy/                  JSON deployment config (fail at startup)
 
 integrations/hermes/cbrain_guard/   Packaged Hermes plugin
@@ -235,8 +235,9 @@ Failure **before** the handler/send is `CONTROL_FAILURE` (retryable only as a
 new request after the control plane is healthy). Failure **after** send may
 have started is `INDETERMINATE`.
 
-The in-process transport exists for local conformance tests. It **cannot**
-claim witness independence. Production egress is the sidecar, which:
+The in-process transport is a unit-test double only. It cannot produce
+`EXECUTED` against real Agent DNA: it returns no closure, and the gateway will
+not seal one. Production egress is the sidecar, which:
 
 - runs outside the agent process
 - never receives model-provider or target secrets from the agent
@@ -289,7 +290,8 @@ PrivateVault is optional at this layer: inject any `PrivateVaultGateway`.
 1. Process **must** start via `cbrain-hermes` (`hermes_launcher.py`).
 2. Startup fails unless plugin `cbrain_guard` is loaded and owns the first
    `pre_tool_call` callback.
-3. Bypass flags (`--safe-mode`, `--yolo`, `--ignore-rules`, …) are refused.
+3. Dash-prefixed argv is allow-listed (currently empty); aliases and bundled
+   shorts are refused with exit 78.
 4. The hook maps the tool to a capability (default deny), captures
    `ActionIntent`, asks PrivateVault, and returns a Hermes **block**
    directive on everything except a fully composed execution gateway.

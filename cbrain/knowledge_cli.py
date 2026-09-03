@@ -64,14 +64,10 @@ def main(arguments: Sequence[str] | None = None) -> int:
         production = production_mode_requested() or bool(config.postgres_dsn)
         if parsed.command == "doctor":
             return _doctor(production=production)
-        runtime = KnowledgeRuntime.from_config(config=config, production=production)
-        if parsed.command == "ingest":
-            return _ingest(runtime, parsed)
-        if parsed.command == "query":
-            return _query(runtime, parsed)
-        if parsed.command == "graph-path":
-            return _graph(runtime, parsed)
-        return _status(runtime, parsed)
+        raise KnowledgeConfigError(
+            "embeddings and extractor must be injected; "
+            "cbrain-knowledge does not default to test fakes"
+        )
     except (KnowledgeError, KnowledgeConfigError, KnowledgeUnavailable) as exc:
         print(str(exc), file=sys.stderr)
         return 2

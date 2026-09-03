@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from cbrain.execution.planner import ToolRoute
+from cbrain.execution.tls import PeerIdentityError, require_peer_identity
 
 
 class ConfigurationError(RuntimeError):
@@ -119,11 +120,11 @@ def _load_routes(value: object) -> dict[str, ToolRoute]:
                 destination=entry["destination"],
                 operation=entry["operation"],
                 credential_audience=entry["credential_audience"],
-                peer_identity=entry["peer_identity"],
+                peer_identity=require_peer_identity(entry["peer_identity"]),
                 allowed_parameters=tuple(entry.get("allowed_parameters", ())),
                 required_parameters=tuple(entry.get("required_parameters", ())),
             )
-        except (KeyError, ValueError) as exc:
+        except (KeyError, ValueError, PeerIdentityError) as exc:
             raise ConfigurationError(f"route {tool_name!r} is invalid: {exc}") from exc
 
     return routes

@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from knowledge_fakes import DeterministicEmbeddingProvider, RuleBasedExtractor
 from operator_fixtures import APPROVER_DIRECTORY, BUYER_LEAD_PRINCIPAL
 
 from cbrain import ExecutionStatus, GovernedRuntime
@@ -14,7 +15,6 @@ from cbrain.company.approval import (
     ApprovalInbox,
     ApprovalRole,
 )
-from cbrain.company.governance import CompanyRiskGateway
 from cbrain.company.handlers import build_handlers
 from cbrain.company.kinds import CompanyAgentKind
 from cbrain.company.profiles import spec_for_kind
@@ -23,6 +23,7 @@ from cbrain.company.simulators import load_fixture_bundle
 from cbrain.company.spec import CompanyAgentSpec
 from cbrain.company.tools import tools_for_kind
 from cbrain.contracts import ActionIntent
+from cbrain.evaluation.company_gateway import CompanyRiskGateway
 from cbrain.evaluation.company_harness import canonical_action_intent_digest
 from cbrain.knowledge import KnowledgeRuntime, RetrievalQuery
 from cbrain.models import CompletionRequest, ModelRouter, TextOutput
@@ -103,7 +104,11 @@ def test_json_extract_rejects_dsn_and_password_fields(tmp_path: Path) -> None:
 
 
 def test_replica_documents_ingest_as_untrusted_knowledge() -> None:
-    runtime = KnowledgeRuntime(clock=lambda: NOW)
+    runtime = KnowledgeRuntime(
+        clock=lambda: NOW,
+        embeddings=DeterministicEmbeddingProvider(),
+        extractor=RuleBasedExtractor(),
+    )
     oracle = demo_replica_sources()[0]
     documents = documents_from_replica(
         oracle,

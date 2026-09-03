@@ -10,14 +10,7 @@ from .adapters.hermes import HermesPreToolDecisionHook
 _CONFIGURATION_EXIT = 78
 _REQUIRED_PLUGIN = "cbrain_guard"
 _REQUIRED_HOOK = "pre_tool_call"
-_FORBIDDEN_ARGUMENTS = frozenset(
-    {
-        "--ignore-rules",
-        "--ignore-user-config",
-        "--safe-mode",
-        "--yolo",
-    }
-)
+_ALLOWED_OPTIONS: frozenset[str] = frozenset()
 
 
 class HermesStartupError(RuntimeError):
@@ -26,9 +19,12 @@ class HermesStartupError(RuntimeError):
 
 def validate_runtime_arguments(arguments: Sequence[str]) -> None:
     for argument in arguments:
-        option = argument.split("=", 1)[0]
-        if option in _FORBIDDEN_ARGUMENTS:
-            raise HermesStartupError(f"Hermes runtime option {option!r} is forbidden")
+        if argument.startswith("-"):
+            option = argument.split("=", 1)[0]
+            if option not in _ALLOWED_OPTIONS:
+                raise HermesStartupError(
+                    f"Hermes runtime option {option!r} is not allow-listed"
+                )
 
     if "plugins" in arguments:
         raise HermesStartupError(
