@@ -422,11 +422,6 @@ class NeverLocalClaim:
         raise AssertionError("independent authorization must be claimed by sidecar")
 
 
-class NeverLocalClose:
-    def seal(self, **kwargs):
-        raise AssertionError("independent closure must be signed by sidecar")
-
-
 def test_concrete_gateway_delegates_claim_send_witness_and_close_to_sidecar():
     transport, claimant, channel, _, closer, _ = make_transport()
     gateway = PrivateVaultExecutionGateway(
@@ -436,7 +431,6 @@ def test_concrete_gateway_delegates_claim_send_witness_and_close_to_sidecar():
         claim_coordinator=NeverLocalClaim(),
         verifier=Verifier(),
         transport=transport,
-        closure_writer=NeverLocalClose(),
         clock=lambda: "2026-07-31T12:00:40Z",
         witness_id_factory=lambda action: "witness-1",
     )

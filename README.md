@@ -120,8 +120,9 @@ An arbitrary Python callback is not considered proof of the bytes transmitted ov
   `INDETERMINATE`
 - Provides a strict HTTPS/mTLS client and TLS server adapter
 
-The existing in-process transport remains available for local conformance tests
-and explicitly cannot claim witness independence.
+The in-process transport is a unit-test double only. It cannot produce
+`EXECUTED` against real Agent DNA: it returns no closure, and the gateway never
+seals one. Production egress is the independent sidecar.
 
 ### Executable CRM and Ledger Targets
 

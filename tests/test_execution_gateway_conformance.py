@@ -37,6 +37,7 @@ from cbrain.adapters.privatevault_execution import (  # noqa: E402
 )
 from cbrain.dispatch import PreparedDispatch  # noqa: E402
 from cbrain.execution import (  # noqa: E402
+    DispatchResult,
     DispatchTransportError,
     InProcessDispatchTransport,
     IssuedAuthorization,
@@ -290,11 +291,52 @@ class MemoryConsumptionStore:
         return True
 
 
+class SealingDispatchTransport:
+    """Test double of sidecar sealing: attach a signed closure after dispatch."""
+
+    def __init__(self, inner: InProcessDispatchTransport, closer: Closer) -> None:
+        self._inner = inner
+        self._closer = closer
+        self.identity = inner.identity
+
+    def with_handler(self, handler_runner) -> SealingDispatchTransport:
+        return SealingDispatchTransport(
+            self._inner.with_handler(handler_runner),
+            self._closer,
+        )
+
+    def dispatch(self, **kwargs) -> DispatchResult:
+        result = self._inner.dispatch(**kwargs)
+        closure = self._closer.seal(
+            authorization=kwargs["authorization"],
+            witness=result.witness,
+            trust_bundle=kwargs["trust_bundle"],
+            dispatch_outcome=result.dispatch_outcome,
+            response_status=result.response_status,
+            response_bytes=result.response_bytes,
+            effect_state=result.effect_state,
+            idempotency_key_digest=kwargs["prepared"].dispatch[
+                "idempotency_key_digest"
+            ],
+        )
+        return DispatchResult(
+            witness=result.witness,
+            dispatch_outcome=result.dispatch_outcome,
+            response_status=result.response_status,
+            response_bytes=result.response_bytes,
+            effect_state=result.effect_state,
+            output=result.output,
+            closure=closure,
+        )
+
+
 def build_gateway(
     keys: Keyring,
     store: MemoryConsumptionStore,
     verdict: PrivateVaultVerdict = PrivateVaultVerdict.ALLOW,
     independent_witness: bool = False,
+    *,
+    seal_closure: bool = True,
 ) -> PrivateVaultExecutionGateway:
     verifiers = AgentDNAVerifiers(
         verify_execution_authorization=(execution_v01.verify_execution_authorization),
@@ -302,6 +344,20 @@ def build_gateway(
         verify_closure_chain=closure_v01.verify_closure_chain,
     )
     verifier = PrivateVaultAgentDNAVerifier(verifiers)
+    closer = Closer(keys)
+    transport: InProcessDispatchTransport | SealingDispatchTransport
+    transport = InProcessDispatchTransport(
+        handler_runner=lambda arguments: None,
+        witness_signer=dispatch_v01.create_dispatch_witness,
+        signing_key=keys.witness,
+        identity=WitnessIdentity(
+            witness_component_id="dispatcher-01",
+            signer_key_id="witness-signer-01",
+            independent=independent_witness,
+        ),
+    )
+    if seal_closure:
+        transport = SealingDispatchTransport(transport, closer)
 
     return PrivateVaultExecutionGateway(
         decision_client=StubDecisionClient(verdict),
@@ -315,17 +371,7 @@ def build_gateway(
             consumption_store=store,
         ),
         verifier=verifier,
-        transport=InProcessDispatchTransport(
-            handler_runner=lambda arguments: None,
-            witness_signer=dispatch_v01.create_dispatch_witness,
-            signing_key=keys.witness,
-            identity=WitnessIdentity(
-                witness_component_id="dispatcher-01",
-                signer_key_id="witness-signer-01",
-                independent=independent_witness,
-            ),
-        ),
-        closure_writer=Closer(keys),
+        transport=transport,
         clock=lambda: "2026-07-31T12:00:40Z",
         witness_id_factory=lambda action: "witness-001",
     )
@@ -450,3 +496,19 @@ def test_in_process_transport_refuses_to_claim_independence():
                 independent=True,
             ),
         )
+
+
+def test_in_process_transport_without_closure_is_unproven():
+    keys = Keyring()
+    store = MemoryConsumptionStore()
+    calls: list[Any] = []
+    gateway = build_gateway(keys, store, seal_closure=False)
+
+    result = gateway.decide_and_execute(
+        intent(), lambda arguments: calls.append(arguments) or {"refund_id": "rf-1"}
+    )
+
+    assert result.status is ExecutionStatus.INDETERMINATE, result.reason
+    assert result.reason.startswith("closure_unproven:")
+    assert result.retryable is False
+    assert len(calls) == 1

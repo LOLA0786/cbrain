@@ -104,7 +104,6 @@ class PrivateVaultExecutionGateway:
         claim_coordinator: PrivateVaultAuthorizationClaimCoordinator,
         verifier: PrivateVaultAgentDNAVerifier,
         transport: DispatchTransport,
-        closure_writer: ClosureWriter,
         clock: Callable[[], str],
         witness_id_factory: Callable[[ActionIntent], str],
     ) -> None:
@@ -114,7 +113,6 @@ class PrivateVaultExecutionGateway:
         self._claim_coordinator = claim_coordinator
         self._verifier = verifier
         self._transport = transport
-        self._closure_writer = closure_writer
         self._clock = clock
         self._witness_id_factory = witness_id_factory
         self.independent_execution = transport.identity.independent
@@ -225,22 +223,7 @@ class PrivateVaultExecutionGateway:
             )
             closure = result.closure
             if closure is None:
-                if self.independent_execution:
-                    raise ExecutionGatewayError(
-                        "independent dispatch returned no closure"
-                    )
-                closure = self._closure_writer.seal(
-                    authorization=issued.authorization,
-                    witness=result.witness,
-                    trust_bundle=issued.trust_bundle,
-                    dispatch_outcome=result.dispatch_outcome,
-                    response_status=result.response_status,
-                    response_bytes=result.response_bytes,
-                    effect_state=result.effect_state,
-                    idempotency_key_digest=(
-                        planned.prepared.dispatch["idempotency_key_digest"]
-                    ),
-                )
+                raise ExecutionGatewayError("dispatch returned no closure")
             self._verifier.verify_closure(
                 verified_dispatch=verified_dispatch,
                 closure=closure,

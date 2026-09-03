@@ -235,8 +235,9 @@ Failure **before** the handler/send is `CONTROL_FAILURE` (retryable only as a
 new request after the control plane is healthy). Failure **after** send may
 have started is `INDETERMINATE`.
 
-The in-process transport exists for local conformance tests. It **cannot**
-claim witness independence. Production egress is the sidecar, which:
+The in-process transport is a unit-test double only. It cannot produce
+`EXECUTED` against real Agent DNA: it returns no closure, and the gateway will
+not seal one. Production egress is the sidecar, which:
 
 - runs outside the agent process
 - never receives model-provider or target secrets from the agent
