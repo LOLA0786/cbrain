@@ -161,6 +161,12 @@ def test_cbrain_not_first_refuses_startup(
         ["--ignore-user-config"],
         ["--yolo"],
         ["plugins", "disable", "cbrain_guard"],
+        ["--ignore_rules"],
+        ["--ignore-rules=true"],
+        ["-yolo"],
+        ["--safe_mode"],
+        ["-abc"],
+        ["--yolo", "chat"],
     ],
 )
 def test_runtime_bypass_arguments_are_rejected(
@@ -168,6 +174,11 @@ def test_runtime_bypass_arguments_are_rejected(
 ) -> None:
     with pytest.raises(hermes_launcher.HermesStartupError):
         hermes_launcher.validate_runtime_arguments(arguments)
+
+
+def test_non_option_runtime_arguments_are_allowed() -> None:
+    hermes_launcher.validate_runtime_arguments(["chat"])
+    hermes_launcher.validate_runtime_arguments([])
 
 
 def test_main_runs_hermes_only_after_verification(

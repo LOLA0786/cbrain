@@ -264,12 +264,8 @@ Built against the real NousResearch Hermes plugin system.
   - `cbrain_guard` is loaded
   - CBrain owns the first pre-tool callback
   - The expected callback implementation is registered
-- Rejects bypass flags including:
-  - `--safe-mode`
-  - `--ignore-rules`
-  - `--ignore-user-config`
-  - `--yolo`
-- Plugin administration is blocked through the production launcher
+- Allow-lists no dash-prefixed Hermes options; aliases, bundled shorts, and
+  `plugins` administration are refused with exit 78
 
 Hermes documents hook and middleware failures as fail-open. CBrain catches control failures inside the hook and returns a valid blocking directive. The mandatory launcher prevents silent startup without enforcement.
 

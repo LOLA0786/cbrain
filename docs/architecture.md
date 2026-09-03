@@ -290,7 +290,8 @@ PrivateVault is optional at this layer: inject any `PrivateVaultGateway`.
 1. Process **must** start via `cbrain-hermes` (`hermes_launcher.py`).
 2. Startup fails unless plugin `cbrain_guard` is loaded and owns the first
    `pre_tool_call` callback.
-3. Bypass flags (`--safe-mode`, `--yolo`, `--ignore-rules`, …) are refused.
+3. Dash-prefixed argv is allow-listed (currently empty); aliases and bundled
+   shorts are refused with exit 78.
 4. The hook maps the tool to a capability (default deny), captures
    `ActionIntent`, asks PrivateVault, and returns a Hermes **block**
    directive on everything except a fully composed execution gateway.
