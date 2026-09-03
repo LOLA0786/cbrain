@@ -328,7 +328,7 @@ Exact upstream identities are stored in [`upstreams.lock.json`](upstreams.lock.j
 | --- | --- | --- |
 | Hermes Agent | `NousResearch/hermes-agent` | `f3cda0ceb18d8ba7465a6d223098ef0e56c8fee1` |
 | GBrain | `garrytan/gbrain` | `c6dc0adf26a2d20df1147d2ec87c8922ca86d410` |
-| PrivateVault Agent DNA | `LOLA0786/privatevault-agent-dna` | `eabc02e806fe4804d7422556af3d1b376742ccfc` |
+| PrivateVault Agent DNA | `LOLA0786/privatevault-agent-dna` | `3789a21637e99be074b5b68fcc441722b2e94ae5` |
 
 Upstream changes require review and conformance testing before these pins are updated.
 
@@ -386,6 +386,7 @@ Do not install the heavy framework group in Google Cloud Shell. Build it through
 ## Verification
 
 ```bash
+uv run ruff format --check cbrain integrations tests
 uv run ruff check cbrain integrations tests
 uv run mypy cbrain
 uv run pytest -q
@@ -393,69 +394,73 @@ uv lock --check
 git diff --check
 ```
 
-Current verification:
-
-```text
-197 default tests passed
-7 additional real Agent DNA conformance tests passed in pinned CI
-204 total tests with the PrivateVault dependency enabled
-Ruff clean
-Production-source mypy clean
-Dependency lock consistent
-```
+CI also compiles sources. Test counts are not documented here; they change
+with every merge. `pytest -q` and the mandatory execution-gateway conformance
+job are the source of truth.
 
 ## Project Layout
 
 ```text
 cbrain/
-├── adapters/
+├── contracts.py             ActionIntent, GovernedExecution, ExecutionStatus
+├── ports.py                 PrivateVaultGateway protocol, ToolHandler
+├── runtime.py               GovernedRuntime
+├── dispatch.py              PreparedDispatch
+├── consumption.py           Atomic one-use authorization claim
+├── hermes_launcher.py       Fail-closed Hermes process wrapper
+├── knowledge_cli.py
+├── adapters/                Translation only
 │   ├── framework.py
-│   ├── gbrain.py
 │   ├── hermes.py
+│   ├── gbrain.py
 │   ├── privatevault.py
+│   ├── privatevault_http.py
 │   ├── privatevault_claim.py
-│   ├── privatevault_consumption.py
 │   ├── privatevault_execution.py
-│   └── privatevault_http.py
+│   └── privatevault_consumption.py
 ├── execution/
 │   ├── gateway.py
+│   ├── planner.py
+│   ├── authorize_client.py
+│   ├── transport.py
 │   ├── sidecar.py
-│   └── transport.py
-├── evaluation/
-│   ├── catalog.py
-│   ├── cli.py
-│   ├── harness.py
-│   └── model_matrix.py
+│   ├── tls.py
+│   └── spki_cli.py
+├── agent/
+│   ├── foundation.py
+│   ├── profile.py
+│   ├── tools.py
+│   ├── durable.py
+│   ├── durable_loop.py
+│   ├── store_memory.py / store_sqlite.py
+│   ├── limits.py
+│   └── insights.py
+├── company/
+│   ├── kinds.py / profiles.py / tools.py / spec.py / risk.py
+│   ├── authority.py
+│   ├── validation.py
+│   ├── approval.py
+│   ├── handlers.py
+│   └── simulators.py
+├── knowledge/
+│   ├── runtime.py
+│   ├── contracts.py / ports.py
+│   ├── ingestion.py / retrieval.py / graph.py
+│   └── stores/
+├── procurement/
 ├── models/
-│   ├── anthropic.py
-│   ├── contracts.py
-│   ├── google.py
-│   ├── openai_compatible.py
-│   ├── router.py
-│   └── transport.py
 ├── simulators/
-│   ├── contracts.py
-│   ├── crm.py
-│   ├── http.py
-│   ├── ledger.py
-│   └── planner.py
-├── consumption.py
-├── contracts.py
-├── dispatch.py
-├── hermes_launcher.py
-├── ports.py
-└── runtime.py
+├── evaluation/
+│   ├── catalog.py / cli.py / harness.py / model_matrix.py
+│   ├── company_gateway.py
+│   ├── company_harness.py / company_scenarios.py / company_suites.py
+│   ├── company_reporting.py / company_gates.py
+│   ├── operator_loop.py / operator_tasks.py
+│   └── agent_harness.py / agent_suites.py / agent_reporting.py
+└── deploy/
 
-integrations/
-└── hermes/
-    └── cbrain_guard/
-
-skills/
-└── govern-cbrain-execution/
-    ├── SKILL.md
-    ├── agents/openai.yaml
-    └── references/contracts.md
-
+integrations/hermes/cbrain_guard/
+skills/govern-cbrain-execution/
 tests/
 migrations/postgres/
 upstreams.lock.json
