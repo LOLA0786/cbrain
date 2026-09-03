@@ -38,6 +38,14 @@ from .ledger import (
     PAYMENTS_LIMIT_READ,
     PAYMENTS_TRANSFER_INITIATE,
 )
+from .mail import PROCUREMENT_MAIL_SEND
+from .orders import (
+    PROCUREMENT_PO_AMEND,
+    PROCUREMENT_PO_CANCEL,
+    PROCUREMENT_PO_CREATE,
+    PROCUREMENT_PO_READ,
+    PROCUREMENT_SHIPMENT_READ,
+)
 
 SIMULATOR_OPERATIONS: Mapping[str, str] = MappingProxyType(
     {
@@ -50,6 +58,12 @@ SIMULATOR_OPERATIONS: Mapping[str, str] = MappingProxyType(
         "POST /v1/payments/limits/modify": PAYMENTS_LIMIT_MODIFY,
         "POST /v1/payments/beneficiaries/add": PAYMENTS_BENEFICIARY_ADD,
         "POST /v1/payments/transfers/initiate": PAYMENTS_TRANSFER_INITIATE,
+        "POST /v1/procurement/po/create": PROCUREMENT_PO_CREATE,
+        "POST /v1/procurement/po/read": PROCUREMENT_PO_READ,
+        "POST /v1/procurement/po/amend": PROCUREMENT_PO_AMEND,
+        "POST /v1/procurement/po/cancel": PROCUREMENT_PO_CANCEL,
+        "POST /v1/procurement/shipments/read": PROCUREMENT_SHIPMENT_READ,
+        "POST /v1/procurement/mail/send": PROCUREMENT_MAIL_SEND,
     }
 )
 _SHA256_HEX = re.compile(r"[0-9a-f]{64}")
@@ -199,17 +213,17 @@ def encode_simulator_request(
     )
 
 
-def serve_simulator(
+def bind_simulator_server(
     *,
     application: SimulatorApplication,
     host: str,
     port: int,
     ssl_context: ssl.SSLContext,
     max_request_bytes: int = 1024 * 1024,
-) -> None:
-    """Serve one target simulator over TLS without logging request content."""
+) -> ThreadingHTTPServer:
+    """Bind one TLS simulator server without logging request content."""
 
-    if not host.strip() or port < 1 or port > 65535:
+    if not host.strip() or port < 0 or port > 65535:
         raise ValueError("simulator host or port is invalid")
     if max_request_bytes <= 0:
         raise ValueError("max_request_bytes must be positive")
@@ -244,6 +258,28 @@ def serve_simulator(
 
     server = ThreadingHTTPServer((host, port), Handler)
     server.socket = ssl_context.wrap_socket(server.socket, server_side=True)
+    return server
+
+
+def serve_simulator(
+    *,
+    application: SimulatorApplication,
+    host: str,
+    port: int,
+    ssl_context: ssl.SSLContext,
+    max_request_bytes: int = 1024 * 1024,
+) -> None:
+    """Serve one target simulator over TLS without logging request content."""
+
+    if port < 1:
+        raise ValueError("simulator host or port is invalid")
+    server = bind_simulator_server(
+        application=application,
+        host=host,
+        port=port,
+        ssl_context=ssl_context,
+        max_request_bytes=max_request_bytes,
+    )
     try:
         server.serve_forever()
     finally:
@@ -296,6 +332,7 @@ __all__ = [
     "SIMULATOR_OPERATIONS",
     "SimulatorApplication",
     "SimulatorHTTPResponse",
+    "bind_simulator_server",
     "encode_simulator_request",
     "serve_simulator",
 ]
