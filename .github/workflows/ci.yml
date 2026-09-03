@@ -41,8 +41,10 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
         with:
+          version: "0.12.9"
           enable-cache: true
-          cache-dependency-glob: cbrain/uv.lock
+          working-directory: cbrain
+          cache-dependency-glob: uv.lock
 
       - name: Install locked development, PrivateVault, and knowledge dependencies
         run: uv sync --locked --extra dev --extra privatevault --extra knowledge
@@ -145,8 +147,10 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
         with:
+          version: "0.12.9"
           enable-cache: true
-          cache-dependency-glob: cbrain/uv.lock
+          working-directory: cbrain
+          cache-dependency-glob: uv.lock
 
       - name: Install locked knowledge dependencies
         run: uv sync --locked --extra dev --extra privatevault --extra knowledge
