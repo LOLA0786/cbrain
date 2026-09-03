@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import base64
 import binascii
-import hashlib
 import http.client
 import json
 import os
@@ -28,6 +27,7 @@ from urllib.parse import urlsplit
 from cbrain.adapters.privatevault_execution import ExecutionAuthorizationBinding
 from cbrain.dispatch import PreparedDispatch
 from cbrain.execution.gateway import ClosureWriter
+from cbrain.execution.tls import PeerIdentityError, peer_identity_from_der_certificate
 from cbrain.execution.transport import (
     DispatchResult,
     DispatchTransportError,
@@ -546,11 +546,14 @@ class _PinnedHTTPSChannel:
         if socket is None:
             raise SidecarError("target TLS connection has no peer socket")
         certificate = socket.getpeercert(binary_form=True)
-        if not certificate:
+        if not isinstance(certificate, bytes) or not certificate:
             raise SidecarError("target TLS peer certificate is unavailable")
-        self.peer_identity_bytes = (
-            f"tls-cert-sha256:{hashlib.sha256(certificate).hexdigest()}".encode()
-        )
+        try:
+            self.peer_identity_bytes = peer_identity_from_der_certificate(
+                certificate
+            ).encode("ascii")
+        except PeerIdentityError as exc:
+            raise SidecarError("target TLS peer identity is unreadable") from exc
 
     def send_exact(
         self,

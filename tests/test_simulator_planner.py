@@ -19,7 +19,7 @@ from cbrain.simulators import (
 
 ZERO = "sha256:" + ("0" * 64)
 ONE = "sha256:" + ("1" * 64)
-PEER = b"tls-cert-sha256:" + (b"a" * 64)
+PEER = b"tls-spki-sha256:" + (b"a" * 64)
 
 
 def planner() -> SimulatorDispatchPlanner:

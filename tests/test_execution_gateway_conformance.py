@@ -56,7 +56,7 @@ ONE = "sha256:" + ("1" * 64)
 ORG = "store.example"
 
 WIRE_BYTES = b'{"account":"4471","amount":400000,"currency":"INR"}'
-PEER_BYTES = b"tls-spki:payments.store.example:v3"
+PEER_BYTES = b"tls-spki-sha256:" + (b"a" * 64)
 
 
 class Keyring:

@@ -98,7 +98,7 @@ def _prepared() -> PreparedDispatch:
             "retry_policy_digest": ONE,
         },
         wire_bytes=b'{"amount":400000}',
-        peer_identity_bytes=(b"tls-spki:payments.example:v1"),
+        peer_identity_bytes=(b"tls-spki-sha256:" + (b"a" * 64)),
     )
 
 

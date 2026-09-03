@@ -11,6 +11,8 @@
   "witness_signer_key_id": "witness-signer-01",
   "request_timeout_seconds": 5.0,
 
+  "_comment": "Compute each route peer_identity with `cbrain-spki <host> <port>`. Canonical form is tls-spki-sha256:<64 lowercase hex>, SHA-256 of the peer certificate SubjectPublicKeyInfo DER. A leaf-certificate rotation keeps the pin if the public key is unchanged.",
+
   "routes": {
     "payments.refund": {
       "tool_id": "payments.refund.v3",
@@ -18,7 +20,7 @@
       "destination": "payments.internal.acme-bank",
       "operation": "POST /v1/refunds",
       "credential_audience": "payments.internal.acme-bank",
-      "peer_identity": "tls-spki:payments.internal.acme-bank:v3",
+      "peer_identity": "tls-spki-sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
       "allowed_parameters": ["amount", "currency", "case_id", "beneficiary_id"],
       "required_parameters": ["amount", "currency", "beneficiary_id"]
     },
@@ -28,7 +30,7 @@
       "destination": "crm.internal.acme-bank",
       "operation": "PATCH /v1/contacts",
       "credential_audience": "crm.internal.acme-bank",
-      "peer_identity": "tls-spki:crm.internal.acme-bank:v1",
+      "peer_identity": "tls-spki-sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
       "allowed_parameters": ["contact_id", "email", "phone"],
       "required_parameters": ["contact_id"]
     }

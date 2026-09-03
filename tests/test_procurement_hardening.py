@@ -383,7 +383,7 @@ def _verified_closure_for(
             "retry_policy_digest": ONE,
         },
         wire_bytes=b'{"award":true}',
-        peer_identity_bytes=b"tls-spki:procurement.example:v1",
+        peer_identity_bytes=b"tls-spki-sha256:" + (b"a" * 64),
     )
     binding = ExecutionAuthorizationBinding.capture(
         request_id=action.request_id,
