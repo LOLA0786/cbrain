@@ -45,6 +45,17 @@ from .planner import (
     SimulatorPlanningError,
     SimulatorTargetBinding,
 )
+from .procurement import (
+    PROCUREMENT_CAPABILITIES,
+    PROCUREMENT_QUOTE_READ,
+    PROCUREMENT_QUOTE_REQUEST,
+    PROCUREMENT_VENDOR_LIST,
+    PROCUREMENT_VENDOR_RELIABILITY_READ,
+    ProcurementSimulator,
+    Quote,
+    ReliabilityRecord,
+    Vendor,
+)
 
 __all__ = [
     "CRM_CAPABILITIES",
@@ -53,6 +64,11 @@ __all__ = [
     "CRM_EMAIL_SEND",
     "CRM_EXPORT_CONTACTS",
     "PAYMENT_CAPABILITIES",
+    "PROCUREMENT_CAPABILITIES",
+    "PROCUREMENT_QUOTE_READ",
+    "PROCUREMENT_QUOTE_REQUEST",
+    "PROCUREMENT_VENDOR_LIST",
+    "PROCUREMENT_VENDOR_RELIABILITY_READ",
     "PAYMENTS_BALANCE_READ",
     "PAYMENTS_BENEFICIARY_ADD",
     "PAYMENTS_LIMIT_MODIFY",
@@ -67,6 +83,9 @@ __all__ = [
     "ExecutableSimulator",
     "LedgerAccount",
     "LedgerSimulator",
+    "ProcurementSimulator",
+    "Quote",
+    "ReliabilityRecord",
     "SIMULATOR_EFFECT_SCHEMA",
     "SIMULATOR_OPERATIONS",
     "SIMULATOR_REQUEST_SCHEMA",
@@ -80,6 +99,7 @@ __all__ = [
     "SimulatorNotFound",
     "SimulatorPlanningError",
     "SimulatorTargetBinding",
+    "Vendor",
     "encode_simulator_request",
     "serve_simulator",
 ]

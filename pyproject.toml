@@ -45,6 +45,9 @@ where = ["."]
 include = ["cbrain*"]
 exclude = ["tests*"]
 
+[tool.setuptools.package-data]
+"cbrain.simulators.catalog" = ["*.json"]
+
 [tool.pytest.ini_options]
 addopts = "-ra --strict-config --strict-markers"
 testpaths = ["tests"]
