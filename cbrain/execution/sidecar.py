@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import http.client
 import json
 import os
@@ -183,9 +184,12 @@ class SidecarDispatchService:
         identity: WitnessIdentity,
         closure_writer: ClosureWriter,
         clock: Callable[[], str],
+        pinned_trust_bundle: Mapping[str, Any],
     ) -> None:
         if not identity.independent:
             raise SidecarError("sidecar witness identity must be independent")
+        if not isinstance(pinned_trust_bundle, Mapping) or not pinned_trust_bundle:
+            raise SidecarError("pinned_trust_bundle must be a non-empty mapping")
         self._claimant = claimant
         self._connector = connector
         self._credential_provider = credential_provider
@@ -194,6 +198,8 @@ class SidecarDispatchService:
         self._identity = identity
         self._closure_writer = closure_writer
         self._clock = clock
+        self._pinned_trust_bundle = dict(pinned_trust_bundle)
+        self._pinned_trust_digest = _trust_bundle_digest(self._pinned_trust_bundle)
 
     def handle(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
         request_id = _possible_request_id(payload)
@@ -242,6 +248,16 @@ class SidecarDispatchService:
 
         try:
             try:
+                # Deployment-owned trust root: never verify with a
+                # caller-selected bundle. Refuse before credentials or
+                # target contact when the request names a foreign root.
+                if _trust_bundle_digest(envelope.trust_bundle) != (
+                    self._pinned_trust_digest
+                ):
+                    raise SidecarError(
+                        "request trust_bundle does not match the deployment pin"
+                    )
+
                 wire_content_type = _safe_header_value(
                     _required_text(dispatch, "wire_content_type"),
                     "wire_content_type",
@@ -265,7 +281,7 @@ class SidecarDispatchService:
                 sidecar_observed_at = self._clock()
                 self._claimant.verify_and_claim(
                     authorization=envelope.authorization,
-                    trust_bundle=envelope.trust_bundle,
+                    trust_bundle=self._pinned_trust_bundle,
                     binding=envelope.binding,
                     claimed_at=sidecar_observed_at,
                 )
@@ -896,6 +912,10 @@ def _canonical_json(value: Mapping[str, Any]) -> bytes:
         ).encode("utf-8")
     except (TypeError, ValueError) as exc:
         raise SidecarProtocolError("sidecar payload is not finite JSON") from exc
+
+
+def _trust_bundle_digest(bundle: Mapping[str, Any]) -> str:
+    return "sha256:" + hashlib.sha256(_canonical_json(dict(bundle))).hexdigest()
 
 
 def _same_bytes(left: bytes, right: bytes) -> bool:

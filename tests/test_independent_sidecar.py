@@ -224,6 +224,7 @@ def make_transport(
         ),
         closure_writer=closer,
         clock=lambda: "2026-07-31T12:00:41Z",
+        pinned_trust_bundle={"bundle": "test"},
     )
     rpc = RPC(service)
     transport = SidecarDispatchTransport(
@@ -450,3 +451,27 @@ def test_concrete_gateway_delegates_claim_send_witness_and_close_to_sidecar():
     assert claimant.calls == 1
     assert channel.send_calls == 1
     assert closer.calls == 1
+
+
+def test_forged_request_trust_bundle_never_reaches_credentials_or_target():
+    """Phase 3: caller-selected trust root is refused before target contact."""
+    transport, claimant, channel, credentials, closer, _ = make_transport()
+    bound = binding()
+    with pytest.raises(DispatchTransportError, match="pre_dispatch_refused"):
+        transport.dispatch(
+            authorization={
+                "request_id": bound.request_id,
+                "execution_authorization_id": "eauth-forged",
+            },
+            trust_bundle={"bundle": "attacker-controlled"},
+            action=bound.action,
+            prepared=bound.prepared_dispatch,
+            witness_id="witness-forged",
+            observed_at="2026-07-31T12:00:40Z",
+            attempt=1,
+            binding=bound,
+        )
+    assert claimant.calls == 0
+    assert credentials.audiences == []
+    assert channel.send_calls == 0
+    assert closer.calls == 0
