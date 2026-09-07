@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any
 
 from cbrain.adapters.privatevault_consumption import (
@@ -47,6 +48,11 @@ class PrivateVaultAuthorizationClaimCoordinator:
         claim_time = binding.at_time if claimed_at is None else claimed_at
         if not isinstance(claim_time, str) or not claim_time.strip():
             raise PrivateVaultExecutionError("authorization claim time is invalid")
+
+        # Verify expiry at the trusted dispatch boundary's actual claim time.
+        # Recording a fresh timestamp while verifying an old binding time can
+        # otherwise consume an authorization that has expired in the meantime.
+        binding = replace(binding, at_time=claim_time)
 
         authorization_json = _snapshot_object(
             authorization,

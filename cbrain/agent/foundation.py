@@ -19,6 +19,7 @@ from cbrain.models import (
     ModelRouter,
     TextOutput,
     ToolCall,
+    validate_history,
 )
 from cbrain.runtime import GovernedRuntime
 
@@ -213,6 +214,27 @@ class FoundationAgent:
 
             model_turns += 1
 
+            # A provider can return after the run was cancelled or expired.
+            # Recheck before turning its proposal into a new consequential action.
+            if self._cancelled():
+                return self._terminal(
+                    run_id=run_id,
+                    status=RunStatus.CANCELLED,
+                    events=events,
+                    metadata=self._metadata(run_input),
+                    tool_calls=tool_calls,
+                    model_turns=model_turns,
+                )
+            if self._clock() >= deadline:
+                return self._terminal(
+                    run_id=run_id,
+                    status=RunStatus.TIMED_OUT,
+                    events=events,
+                    metadata=self._metadata(run_input),
+                    tool_calls=tool_calls,
+                    model_turns=model_turns,
+                )
+
             if isinstance(output, TextOutput):
                 if len(output.text) > limits.max_model_text_chars:
                     return self._failed(
@@ -324,7 +346,7 @@ class FoundationAgent:
                     arguments=output.arguments,
                     request_id=request_id,
                     idempotency_key=request_id,
-                    timestamp=now,
+                    timestamp=self._wall_clock(),
                     context={"run_id": run_id, "tool_call_id": output.call_id},
                 )
             except ContractError as exc:
@@ -352,6 +374,18 @@ class FoundationAgent:
                 )
             )
 
+            try:
+                validate_history([*messages, output.as_message()], allow_pending=True)
+            except ModelError as exc:
+                return self._failed(
+                    run_id=run_id,
+                    status=RunStatus.INVALID_MODEL_RESPONSE,
+                    events=events,
+                    metadata=self._metadata(run_input, reason=str(exc)),
+                    tool_calls=tool_calls,
+                    model_turns=model_turns,
+                )
+            messages.append(output.as_message())
             handler = self._handlers[output.name]
             execution = self._runtime.execute(action, handler)
             tool_calls += 1
@@ -523,7 +557,10 @@ class FoundationAgent:
 
         ctx = initialized
         knowledge_message, knowledge_tools_blocked = self._knowledge_context(run_input)
-        if knowledge_message is not None:
+        if knowledge_message is not None and ctx.record.durable_state not in {
+            DurableRunState.TOOL_PREPARED,
+            DurableRunState.TOOL_COMPLETED,
+        }:
             ctx.messages.append(knowledge_message)
         try:
             tool_definitions = self._tools.definitions_for(
@@ -563,13 +600,13 @@ class FoundationAgent:
             output: TextOutput | ToolCall | None = None
             tool_resume_completed = False
             tool_resume_prepared = False
-            if resume_phase == "completed":
-                output = restore_tool_call(ctx.record)
-                tool_resume_completed = True
-                resume_phase = None
-            elif resume_phase == "prepared":
-                output = restore_tool_call(ctx.record)
-                tool_resume_prepared = True
+            if resume_phase in {"completed", "prepared"}:
+                try:
+                    output = restore_tool_call(ctx.record)
+                except RunStoreError as exc:
+                    raise FoundationAgentError(str(exc)) from exc
+                tool_resume_completed = resume_phase == "completed"
+                tool_resume_prepared = resume_phase == "prepared"
                 resume_phase = None
             else:
                 ctx.events.append(
@@ -605,6 +642,11 @@ class FoundationAgent:
                     model_turns=ctx.model_turns,
                     next_step=step,
                 )
+
+                if self._cancelled():
+                    return self._persist_terminal(ctx, status=RunStatus.CANCELLED)
+                if self._clock() >= ctx.deadline_monotonic:
+                    return self._persist_terminal(ctx, status=RunStatus.TIMED_OUT)
 
             if (
                 not tool_resume_completed
@@ -683,6 +725,11 @@ class FoundationAgent:
             if isinstance(tool_result, RunResult):
                 return tool_result
             ctx = tool_result
+            if knowledge_message is not None and (
+                tool_resume_prepared or tool_resume_completed
+            ):
+                # Keep each assistant tool request adjacent to its result.
+                ctx.messages.append(knowledge_message)
             ctx.record = persist_record(
                 self._run_store,
                 ctx.record,
@@ -719,15 +766,27 @@ class FoundationAgent:
         if resume_completed:
             execution = restore_execution(ctx.record)
         else:
+            # Prepared actions still require all controls at the dispatch boundary.
+            if knowledge_tools_blocked:
+                return self._persist_terminal(
+                    ctx,
+                    status=RunStatus.TOOL_FAILURE,
+                    metadata=self._metadata(run_input, reason="KNOWLEDGE_UNAVAILABLE"),
+                )
+            if self._cancelled():
+                return self._persist_terminal(ctx, status=RunStatus.CANCELLED)
+            if self._clock() >= ctx.deadline_monotonic:
+                return self._persist_terminal(ctx, status=RunStatus.TIMED_OUT)
             if not resume_prepared:
-                if knowledge_tools_blocked:
+                try:
+                    validate_history(
+                        [*ctx.messages, output.as_message()], allow_pending=True
+                    )
+                except ModelError as exc:
                     return self._persist_terminal(
                         ctx,
-                        status=RunStatus.TOOL_FAILURE,
-                        metadata=self._metadata(
-                            run_input,
-                            reason="KNOWLEDGE_UNAVAILABLE",
-                        ),
+                        status=RunStatus.INVALID_MODEL_RESPONSE,
+                        metadata=self._metadata(run_input, reason=str(exc)),
                     )
                 try:
                     action = ActionIntent.capture(
@@ -738,7 +797,7 @@ class FoundationAgent:
                         arguments=output.arguments,
                         request_id=request_id,
                         idempotency_key=request_id,
-                        timestamp=now,
+                        timestamp=self._wall_clock(),
                         context={"run_id": ctx.run_id, "tool_call_id": output.call_id},
                     )
                 except ContractError as exc:
@@ -748,6 +807,7 @@ class FoundationAgent:
                         metadata=self._metadata(run_input, reason=str(exc)),
                     )
 
+                ctx.messages.append(output.as_message())
                 ctx.events.append(
                     RunEvent(
                         kind=RunEventKind.TOOL_REQUESTED,
@@ -780,7 +840,7 @@ class FoundationAgent:
                         "arguments": output.arguments,
                         "request_id": request_id,
                         "idempotency_key": request_id,
-                        "timestamp": now,
+                        "timestamp": action.timestamp,
                         "context": {
                             "run_id": ctx.run_id,
                             "tool_call_id": output.call_id,
@@ -949,7 +1009,7 @@ class FoundationAgent:
 
     def _knowledge_context(self, run_input: RunInput) -> tuple[Message | None, bool]:
         if self._knowledge is None:
-            return None, False
+            return None, self._profile.knowledge_required_for_tools
         metadata = dict(run_input.metadata or {})
         tenant_id = metadata.get("tenant_id")
         collection_id = metadata.get("collection_id")

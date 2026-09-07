@@ -12,9 +12,11 @@ from .contracts import (
     ModelOutput,
     ModelResponseError,
     ModelTransportError,
+    ProviderContinuation,
     TextOutput,
     ToolCall,
     ToolDefinition,
+    validate_history,
 )
 from .google import GoogleAdapter
 from .instrumented import CompletionObservation, InstrumentedModelAdapter
@@ -68,6 +70,7 @@ __all__ = [
     "ModelRoutingError",
     "ModelTransportError",
     "OpenAICompatibleAdapter",
+    "ProviderContinuation",
     "TextOutput",
     "ToolCall",
     "ToolDefinition",
@@ -76,4 +79,5 @@ __all__ = [
     "UsageContractError",
     "UsageSource",
     "build_five_provider_router",
+    "validate_history",
 ]

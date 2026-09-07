@@ -45,6 +45,8 @@ class IngestionPipeline:
             existing is not None
             and not existing.tombstoned
             and existing.content_digest == digest
+            and existing.acl_principals == document.acl_principals
+            and existing.provenance == document.provenance
         ):
             return IngestionResult(
                 tenant_id=document.tenant_id,

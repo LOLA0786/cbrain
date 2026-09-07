@@ -1750,6 +1750,7 @@ class PersonalizationManager:
             timeout_seconds=profile.timeout_seconds,
             limits=profile.limits,
             metadata=metadata,
+            knowledge_required_for_tools=profile.knowledge_required_for_tools,
         )
 
 
