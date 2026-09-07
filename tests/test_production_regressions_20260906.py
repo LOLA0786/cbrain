@@ -11,6 +11,7 @@ from dataclasses import replace
 from typing import Any
 
 import pytest
+from knowledge_fakes import DeterministicEmbeddingProvider, RuleBasedExtractor
 
 from cbrain import ActionIntent, ExecutionStatus, GovernedExecution, GovernedRuntime
 from cbrain.agent import (
@@ -25,8 +26,6 @@ from cbrain.agent.durable import DurableRunState, profile_fingerprint
 from cbrain.agent.insights import PersonalizationManager, ReviewerPrincipal
 from cbrain.agent.insights_store import InMemoryLearningStore
 from cbrain.agent.store_memory import InMemoryRunStore
-from knowledge_fakes import DeterministicEmbeddingProvider, RuleBasedExtractor
-
 from cbrain.knowledge import KnowledgeRuntime, RetrievalQuery, SourceDocument
 from cbrain.models import CompletionRequest, ModelRouter, TextOutput, ToolCall
 
