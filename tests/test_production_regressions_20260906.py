@@ -25,6 +25,8 @@ from cbrain.agent.durable import DurableRunState, profile_fingerprint
 from cbrain.agent.insights import PersonalizationManager, ReviewerPrincipal
 from cbrain.agent.insights_store import InMemoryLearningStore
 from cbrain.agent.store_memory import InMemoryRunStore
+from knowledge_fakes import DeterministicEmbeddingProvider, RuleBasedExtractor
+
 from cbrain.knowledge import KnowledgeRuntime, RetrievalQuery, SourceDocument
 from cbrain.models import CompletionRequest, ModelRouter, TextOutput, ToolCall
 
@@ -215,10 +217,18 @@ def query(*, collection: str = "a", principal: str = "alice") -> RetrievalQuery:
     )
 
 
+
+def knowledge_runtime() -> KnowledgeRuntime:
+    return KnowledgeRuntime(
+        embeddings=DeterministicEmbeddingProvider(),
+        extractor=RuleBasedExtractor(),
+    )
+
+
 def test_prepared_resume_rechecks_required_knowledge_before_claim() -> None:
     store = CrashBeforeClaimStore()
     gateway = RecordingGateway()
-    knowledge = KnowledgeRuntime()
+    knowledge = knowledge_runtime()
     knowledge.ingest(document())
     run_input = RunInput(
         task="Check status",
@@ -267,7 +277,7 @@ def test_personalization_preserves_required_knowledge() -> None:
 
 
 def test_acl_revocation_applies_when_text_has_not_changed() -> None:
-    runtime = KnowledgeRuntime()
+    runtime = knowledge_runtime()
     first = runtime.ingest(document(principals=frozenset({"alice", "bob"})))
     assert runtime.retrieve(query(principal="bob")).hits
     second = runtime.ingest(document(principals=frozenset({"alice"})))
@@ -277,7 +287,7 @@ def test_acl_revocation_applies_when_text_has_not_changed() -> None:
 
 
 def test_provenance_change_creates_new_revision_without_text_change() -> None:
-    runtime = KnowledgeRuntime()
+    runtime = knowledge_runtime()
     first = runtime.ingest(document(provenance="old-origin"))
     second = runtime.ingest(document(provenance="corrected-origin"))
     assert second.source_revision > first.source_revision
@@ -285,7 +295,7 @@ def test_provenance_change_creates_new_revision_without_text_change() -> None:
 
 
 def test_same_source_in_separate_collections_does_not_overwrite_chunks() -> None:
-    runtime = KnowledgeRuntime()
+    runtime = knowledge_runtime()
     first = runtime.ingest(document(collection="a"))
     second = runtime.ingest(document(collection="b"))
     assert set(first.chunk_ids).isdisjoint(second.chunk_ids)
@@ -294,7 +304,7 @@ def test_same_source_in_separate_collections_does_not_overwrite_chunks() -> None
 
 
 def test_same_entities_in_separate_collections_keep_separate_provenance() -> None:
-    runtime = KnowledgeRuntime()
+    runtime = knowledge_runtime()
     first = runtime.ingest(document(collection="a"))
     second = runtime.ingest(document(collection="b"))
     left = runtime.store.nodes_for_chunks(first.chunk_ids)
