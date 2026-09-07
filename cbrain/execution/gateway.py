@@ -8,6 +8,11 @@ Failure classification is the load-bearing part. Anything that fails before the
 tool handler is entered is a proven pre-execution failure (CONTROL_FAILURE,
 retryable). Anything that fails once the handler may have run is INDETERMINATE
 and never retryable, because the effect may already exist.
+
+Order matters. The plan is built first, because the pinned PrivateVault server
+only seals a mintable decision when the exact execution action and dispatch
+context are part of the `/v1/decide` request. The same immutable plan is then
+carried through issuance and dispatch; nothing is re-planned after the decision.
 """
 
 from __future__ import annotations
@@ -17,6 +22,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
 from cbrain.adapters.privatevault import (
+    DecisionBinding,
     PrivateVaultDecision,
     PrivateVaultVerdict,
 )
@@ -54,8 +60,13 @@ class DispatchPlanner(Protocol):
 
 
 class DecisionClient(Protocol):
-    def decide(self, action: ActionIntent) -> PrivateVaultDecision:
-        """Return the authoritative PrivateVault decision."""
+    def decide(
+        self,
+        action: ActionIntent,
+        *,
+        binding: DecisionBinding,
+    ) -> PrivateVaultDecision:
+        """Return the authoritative PrivateVault decision sealed to `binding`."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,8 +135,28 @@ class PrivateVaultExecutionGateway:
     ) -> GovernedExecution:
         handler_entered = False
 
+        # Plan before deciding. PrivateVault seals the digests of exactly this
+        # action and dispatch into the decision record; a permit can only be
+        # minted later for the same plan. An intent that cannot be planned
+        # never reaches PrivateVault as a mintable request.
         try:
-            decision = self._decision_client.decide(action)
+            planned = self._planner.plan(action)
+            decision_binding = DecisionBinding.capture(
+                action,
+                execution_action=planned.action,
+                dispatch=planned.prepared.dispatch,
+            )
+        except Exception as exc:
+            return _control_failure(
+                action,
+                f"dispatch_planning_failed:{type(exc).__name__}",
+            )
+
+        try:
+            decision = self._decision_client.decide(
+                action,
+                binding=decision_binding,
+            )
         except Exception as exc:
             return _control_failure(
                 action,
@@ -154,7 +185,6 @@ class PrivateVaultExecutionGateway:
             return _control_failure(action, "unknown_verdict")
 
         try:
-            planned = self._planner.plan(action)
             issued = self._issuer.issue(
                 action=action,
                 decision=decision,

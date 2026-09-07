@@ -15,14 +15,20 @@ from .hermes import (
     register_hermes_hook,
 )
 from .privatevault import (
+    DISPATCH_CONTEXT_FIELDS,
+    EXECUTION_ACTION_FIELDS,
+    MINTABLE_DECISION_PROTOCOL,
+    DecisionBinding,
     HttpJsonResponse,
     JsonTransport,
     PrivateVaultAdapterError,
+    PrivateVaultBindingError,
     PrivateVaultDecision,
     PrivateVaultDecisionClient,
     PrivateVaultProtocolError,
     PrivateVaultTransportError,
     PrivateVaultVerdict,
+    require_mintable_record,
 )
 from .privatevault_http import (
     HeadersProvider,
@@ -30,9 +36,13 @@ from .privatevault_http import (
 )
 
 __all__ = [
+    "DISPATCH_CONTEXT_FIELDS",
+    "EXECUTION_ACTION_FIELDS",
     "GBRAIN_READ_TOOL_CAPABILITIES",
     "GBRAIN_UPSTREAM_COMMIT",
     "GBRAIN_VERSION",
+    "MINTABLE_DECISION_PROTOCOL",
+    "DecisionBinding",
     "DecisionClient",
     "GBrainConfigurationError",
     "GBrainStdioConfig",
@@ -45,6 +55,7 @@ __all__ = [
     "HttpJsonResponse",
     "JsonTransport",
     "PrivateVaultAdapterError",
+    "PrivateVaultBindingError",
     "PrivateVaultDecision",
     "PrivateVaultDecisionClient",
     "PrivateVaultHttpTransport",
@@ -52,4 +63,5 @@ __all__ = [
     "PrivateVaultTransportError",
     "PrivateVaultVerdict",
     "register_hermes_hook",
+    "require_mintable_record",
 ]
