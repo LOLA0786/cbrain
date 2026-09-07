@@ -241,7 +241,6 @@ class SidecarDispatchService:
         send_started = False
 
         try:
-            sidecar_observed_at = self._clock()
             try:
                 wire_content_type = _safe_header_value(
                     _required_text(dispatch, "wire_content_type"),
@@ -261,6 +260,9 @@ class SidecarDispatchService:
                 ):
                     raise SidecarError("observed TLS peer does not match permit")
 
+                # TLS establishment can outlast a permit. Sample trusted time
+                # after connecting, immediately before verification and claim.
+                sidecar_observed_at = self._clock()
                 self._claimant.verify_and_claim(
                     authorization=envelope.authorization,
                     trust_bundle=envelope.trust_bundle,

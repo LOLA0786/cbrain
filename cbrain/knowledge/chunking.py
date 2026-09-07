@@ -26,6 +26,7 @@ def text_digest(text: str) -> str:
 def chunk_id_for(
     *,
     tenant_id: str,
+    collection_id: str,
     source_id: str,
     source_revision: int,
     chunk_index: int,
@@ -34,6 +35,7 @@ def chunk_id_for(
     return sha256_hex(
         {
             "tenant_id": tenant_id,
+            "collection_id": collection_id,
             "source_id": source_id,
             "source_revision": source_revision,
             "chunk_index": chunk_index,
@@ -79,6 +81,7 @@ def build_chunks(
             KnowledgeChunk(
                 chunk_id=chunk_id_for(
                     tenant_id=document.tenant_id,
+                    collection_id=document.collection_id,
                     source_id=document.source_id,
                     source_revision=source_revision,
                     chunk_index=index,

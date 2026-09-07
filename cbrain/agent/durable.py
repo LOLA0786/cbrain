@@ -168,6 +168,7 @@ def profile_fingerprint(profile: AgentProfile) -> str:
         "max_model_turns": profile.max_model_turns,
         "max_tool_calls": profile.max_tool_calls,
         "timeout_seconds": profile.timeout_seconds,
+        "knowledge_required_for_tools": profile.knowledge_required_for_tools,
         "limits": {
             "max_context_messages": limits.max_context_messages,
             "max_model_text_chars": limits.max_model_text_chars,

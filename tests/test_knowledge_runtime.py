@@ -167,6 +167,7 @@ def _query(
 def test_deterministic_chunk_ids() -> None:
     first = chunk_id_for(
         tenant_id=TENANT,
+        collection_id=COLLECTION,
         source_id="src-1",
         source_revision=1,
         chunk_index=0,
@@ -174,6 +175,7 @@ def test_deterministic_chunk_ids() -> None:
     )
     second = chunk_id_for(
         tenant_id=TENANT,
+        collection_id=COLLECTION,
         source_id="src-1",
         source_revision=1,
         chunk_index=0,
@@ -182,6 +184,7 @@ def test_deterministic_chunk_ids() -> None:
     assert first == second
     assert first != chunk_id_for(
         tenant_id=TENANT,
+        collection_id=COLLECTION,
         source_id="src-1",
         source_revision=2,
         chunk_index=0,

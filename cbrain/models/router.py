@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 
 from .anthropic import AnthropicAdapter
-from .contracts import CompletionRequest, ModelAdapter, ModelOutput
+from .contracts import CompletionRequest, ModelAdapter, ModelError, ModelOutput
 from .google import GoogleAdapter
 from .openai_compatible import OpenAICompatibleAdapter
 from .transport import EnvironmentCredentialHeaders, HttpsJsonModelTransport
@@ -27,7 +27,7 @@ FIVE_PROVIDER_ROUTES = (
 )
 
 
-class ModelRoutingError(RuntimeError):
+class ModelRoutingError(ModelError):
     """A model route is missing, duplicated, or invalid."""
 
 
