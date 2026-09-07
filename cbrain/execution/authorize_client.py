@@ -24,6 +24,8 @@ from hmac import compare_digest
 from typing import Any, cast
 
 from cbrain.adapters.privatevault import (
+    KNOWN_WIRE_SERIALIZATIONS,
+    WIRE_SERIALIZATION_JSON_PARAMETERS_V01,
     JsonTransport,
     PrivateVaultDecision,
     PrivateVaultProtocolError,
@@ -110,6 +112,7 @@ class PrivateVaultAuthorizationClient:
         decision_id, record_hash = _sealed_allow_reference(decision, action)
         decision_receipt_digest = "sha256:" + record_hash
         prepared = planned.prepared
+        _require_wire_matches_action(planned)
 
         body: dict[str, Any] = {
             "request_id": action.request_id,
@@ -262,6 +265,45 @@ def _sealed_allow_reference(
         raise AuthorizationRefused("sealed record answers a different request")
 
     return decision_id, record_hash
+
+
+def _require_wire_matches_action(planned: PlannedDispatch) -> None:
+    """Local convenience: refuse before calling PV when wire ≠ action.
+
+    PrivateVault is the authority; this check only attributes the failure
+    earlier when CBrain itself prepared an inconsistent pair. Direct
+    `/v1/authorize` callers still face the server-side binding.
+    """
+    dispatch = planned.prepared.dispatch
+    serialization = dispatch.get("serialization")
+    if (
+        not isinstance(serialization, str)
+        or serialization not in KNOWN_WIRE_SERIALIZATIONS
+    ):
+        raise AuthorizationRefused(
+            "prepared dispatch serialization is missing or unknown"
+        )
+    parameters = planned.action.get("parameters")
+    if not isinstance(parameters, Mapping):
+        raise AuthorizationRefused("planned action parameters must be a mapping")
+    try:
+        expected = json.dumps(
+            dict(parameters),
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise AuthorizationRefused(
+            "planned action parameters are not encodable under "
+            f"{WIRE_SERIALIZATION_JSON_PARAMETERS_V01}"
+        ) from exc
+    if expected != planned.prepared.wire_bytes:
+        raise AuthorizationRefused(
+            "prepared wire_bytes do not match the named serialization of "
+            "action.parameters"
+        )
 
 
 def _refusal_reason(body: Mapping[str, Any]) -> str:

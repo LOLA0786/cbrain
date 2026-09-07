@@ -328,7 +328,7 @@ Exact upstream identities are stored in [`upstreams.lock.json`](upstreams.lock.j
 | --- | --- | --- |
 | Hermes Agent | `NousResearch/hermes-agent` | `f3cda0ceb18d8ba7465a6d223098ef0e56c8fee1` |
 | GBrain | `garrytan/gbrain` | `c6dc0adf26a2d20df1147d2ec87c8922ca86d410` |
-| PrivateVault Agent DNA | `LOLA0786/privatevault-agent-dna` | `3789a21637e99be074b5b68fcc441722b2e94ae5` |
+| PrivateVault Agent DNA | `LOLA0786/privatevault-agent-dna` | `65673769d4c7cd2de980f5f5c335ac09141b7434` |
 
 Upstream changes require review and conformance testing before these pins are updated.
 

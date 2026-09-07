@@ -36,8 +36,14 @@ DISPATCH_CONTEXT_FIELDS = frozenset(
         "operation",
         "destination",
         "wire_content_type",
+        "serialization",
     }
 )
+
+# Named wire serializer sealed into dispatch_context / EA.dispatch. Must match
+# PrivateVault agent_dna.wire_serialization_v01.WIRE_SERIALIZATION_JSON_PARAMETERS_V01.
+WIRE_SERIALIZATION_JSON_PARAMETERS_V01 = "pv-json-parameters/0.1"
+KNOWN_WIRE_SERIALIZATIONS = frozenset({WIRE_SERIALIZATION_JSON_PARAMETERS_V01})
 
 _SHA256_PREFIXED = re.compile(r"sha256:[0-9a-f]{64}")
 _SHA256_HEX = re.compile(r"[0-9a-f]{64}")
@@ -228,12 +234,13 @@ def _validate_execution_action(
 def _dispatch_context_from_dispatch(
     dispatch: Mapping[str, Any],
 ) -> dict[str, str]:
-    """Project the EA dispatch onto the five sealed context fields.
+    """Project the EA dispatch onto the sealed context fields.
 
     `adapter` is not a field of the EA dispatch object; the pinned server
     defaults it to `transport` when it projects the `/v1/authorize` dispatch
     back onto the sealed context. Sending the same default at decide time is
-    what makes the two digests agree.
+    what makes the two digests agree. `serialization` names the trusted
+    contract that must produce `expected_wire_bytes_*` from `action.parameters`.
     """
     if not isinstance(dispatch, Mapping):
         raise PrivateVaultBindingError("dispatch must be a mapping")
@@ -249,6 +256,7 @@ def _dispatch_context_from_dispatch(
         "operation": dispatch.get("operation"),
         "destination": dispatch.get("destination"),
         "wire_content_type": dispatch.get("wire_content_type"),
+        "serialization": dispatch.get("serialization"),
     }
 
     context: dict[str, str] = {}
@@ -259,6 +267,12 @@ def _dispatch_context_from_dispatch(
                 f"dispatch_context.{name} must be a non-empty string"
             )
         context[name] = value
+
+    if context["serialization"] not in KNOWN_WIRE_SERIALIZATIONS:
+        raise PrivateVaultBindingError(
+            "dispatch_context.serialization must be a known wire contract; "
+            f"got {context['serialization']!r}"
+        )
 
     return context
 

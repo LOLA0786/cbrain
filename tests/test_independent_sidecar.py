@@ -42,6 +42,7 @@ def dispatch_document() -> dict[str, Any]:
         "credential_audience": "ledger.example",
         "idempotency_key_digest": ZERO,
         "retry_policy_digest": ONE,
+        "serialization": "pv-json-parameters/0.1",
     }
 
 

@@ -403,13 +403,33 @@ def test_bound_decide_refuses_a_server_that_did_not_seal_the_binding(pv):
 
 
 def test_changed_action_after_decision_cannot_mint(pv):
+    from cbrain.dispatch import PreparedDispatch
+
     harness = Harness(pv)
     action = intent()
     decision, planned = harness.bound_decision(action)
 
+    widened_args = {**ARGUMENTS, "quantity_tonnes": 400}
+    widened_wire = json.dumps(
+        widened_args,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
     widened = dict(planned.action)
-    widened["parameters"] = {**ARGUMENTS, "quantity_tonnes": 400}
-    tampered = PlannedDispatch(action=widened, prepared=planned.prepared)
+    widened["parameters"] = widened_args
+    # Wire must match the tampered action so the local convenience check
+    # does not mask the sealed-arguments refusal from PrivateVault.
+    tampered = PlannedDispatch(
+        action=widened,
+        prepared=PreparedDispatch.capture(
+            request_id=action.request_id,
+            dispatch=planned.prepared.dispatch,
+            wire_bytes=widened_wire,
+            peer_identity_bytes=planned.prepared.peer_identity_bytes,
+        ),
+    )
 
     with pytest.raises(
         AuthorizationRefused,
@@ -572,8 +592,97 @@ def test_a_second_mint_for_the_same_decision_with_other_bindings_conflicts(pv):
         ),
     )
 
+    # Local convenience refuses before HTTP; authority still refuses if
+    # the caller posts the same body directly (see wire-action tests).
     with pytest.raises(
         AuthorizationRefused,
-        match="status 403:AUTHORIZE_PERMIT_BINDING_CONFLICT",
+        match="prepared wire_bytes do not match",
     ):
         harness.issuer.issue(action=action, decision=decision, planned=other_bytes)
+
+    assert_no_permit(
+        harness.raw_authorize(
+            {
+                **harness.authorize_body(
+                    decision.record, planned, request_id=action.request_id
+                ),
+                "expected_wire_bytes_digest": sha256(other_bytes.prepared.wire_bytes),
+                "expected_wire_bytes_length": len(other_bytes.prepared.wire_bytes),
+            }
+        ),
+        "AUTHORIZE_WIRE_ACTION_MISMATCH",
+    )
+
+
+def test_first_mint_refuses_action_wire_mismatch_via_direct_http(pv):
+    """Phase 1: body swap before first mint cannot authorize, even bypassing
+    CBrain's local authorize-client check."""
+    from cbrain.dispatch import PreparedDispatch
+
+    harness = Harness(pv)
+    action = intent()
+    decision, planned = harness.bound_decision(action)
+
+    tampered_args = {**ARGUMENTS, "quantity_tonnes": 400}
+    tampered_wire = json.dumps(
+        tampered_args,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    assert tampered_wire != planned.prepared.wire_bytes
+
+    body = harness.authorize_body(
+        decision.record, planned, request_id=action.request_id
+    )
+    body["expected_wire_bytes_digest"] = sha256(tampered_wire)
+    body["expected_wire_bytes_length"] = len(tampered_wire)
+
+    assert_no_permit(harness.raw_authorize(body), "AUTHORIZE_WIRE_ACTION_MISMATCH")
+
+    # Client-side inconsistency is also refused before the request leaves.
+    inconsistent = PlannedDispatch(
+        action=planned.action,
+        prepared=PreparedDispatch.capture(
+            request_id=action.request_id,
+            dispatch=planned.prepared.dispatch,
+            wire_bytes=tampered_wire,
+            peer_identity_bytes=planned.prepared.peer_identity_bytes,
+        ),
+    )
+    with pytest.raises(AuthorizationRefused, match="prepared wire_bytes do not match"):
+        harness.issuer.issue(action=action, decision=decision, planned=inconsistent)
+
+
+def test_decide_refuses_inconsistent_action_and_wire_digests(pv):
+    """Caller-supplied wire digests at decide must match named serialization."""
+    from cbrain.adapters.privatevault import DecisionBinding
+
+    harness = Harness(pv)
+    action = intent()
+    planned = harness.planner.plan(action)
+    binding = DecisionBinding.capture(
+        action,
+        execution_action=planned.action,
+        dispatch=planned.prepared.dispatch,
+    )
+    payload = binding.decide_payload(action)
+    tampered = {**ARGUMENTS, "quantity_tonnes": 400}
+    bad_wire = json.dumps(
+        tampered,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    payload["expected_wire_bytes_digest"] = sha256(bad_wire)
+    payload["expected_wire_bytes_length"] = len(bad_wire)
+
+    response = harness.server.client.post(
+        "/v1/decide",
+        json=payload,
+        headers={"X-API-Key": harness.server.api_keys[BUYER]},
+    )
+    assert response.status_code == 422, response.text
+    assert "expected_wire_bytes" in response.text

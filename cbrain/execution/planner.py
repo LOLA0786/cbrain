@@ -125,6 +125,7 @@ class HttpDispatchPlanner:
             "credential_audience": route.credential_audience,
             "idempotency_key_digest": _digest(action.idempotency_key.encode("utf-8")),
             "retry_policy_digest": route.retry_policy_digest or _digest(b"no-retry"),
+            "serialization": "pv-json-parameters/0.1",
         }
 
         return PlannedDispatch(

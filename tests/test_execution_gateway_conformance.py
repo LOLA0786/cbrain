@@ -126,6 +126,7 @@ def dispatch_document() -> dict[str, Any]:
         "credential_audience": "payments.store.example",
         "idempotency_key_digest": ZERO,
         "retry_policy_digest": ONE,
+        "serialization": "pv-json-parameters/0.1",
     }
 
 
@@ -423,6 +424,7 @@ def test_decision_is_requested_with_the_planned_action_and_dispatch():
         "operation": dispatch["operation"],
         "destination": dispatch["destination"],
         "wire_content_type": dispatch["wire_content_type"],
+        "serialization": dispatch["serialization"],
     }
 
 

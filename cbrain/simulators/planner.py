@@ -133,6 +133,7 @@ class SimulatorDispatchPlanner:
                     action.idempotency_key.encode("utf-8")
                 ),
                 "retry_policy_digest": target.retry_policy_digest,
+                "serialization": "pv-json-parameters/0.1",
             },
             wire_bytes=wire_bytes,
             peer_identity_bytes=target.peer_identity_bytes,
