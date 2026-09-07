@@ -216,7 +216,6 @@ def query(*, collection: str = "a", principal: str = "alice") -> RetrievalQuery:
     )
 
 
-
 def knowledge_runtime() -> KnowledgeRuntime:
     return KnowledgeRuntime(
         embeddings=DeterministicEmbeddingProvider(),
