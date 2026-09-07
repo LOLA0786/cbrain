@@ -461,9 +461,7 @@ def test_another_agents_record_cannot_mint(pv):
     other = Harness(pv, OTHER)
     # Same request_id so the client reaches the agent_id check rather
     # than stopping at "decision answers a different request".
-    buyer_decision, _ = buyer.bound_decision(
-        intent(request_id="req-shared-001")
-    )
+    buyer_decision, _ = buyer.bound_decision(intent(request_id="req-shared-001"))
 
     other_action = intent(agent_id=OTHER, request_id="req-shared-001")
     other_planned = other.planner.plan(other_action)
