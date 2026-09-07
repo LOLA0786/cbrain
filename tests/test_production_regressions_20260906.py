@@ -302,14 +302,15 @@ def test_same_source_in_separate_collections_does_not_overwrite_chunks() -> None
     assert runtime.retrieve(query(collection="b")).hits
 
 
-def test_same_entities_in_separate_collections_keep_separate_provenance() -> None:
+def test_same_source_graph_nodes_are_tenant_keyed_not_collection_keyed() -> None:
     runtime = knowledge_runtime()
     first = runtime.ingest(document(collection="a"))
     second = runtime.ingest(document(collection="b"))
+    assert set(first.chunk_ids).isdisjoint(second.chunk_ids)
     left = runtime.store.nodes_for_chunks(first.chunk_ids)
     right = runtime.store.nodes_for_chunks(second.chunk_ids)
-    assert left and right
-    assert {node.node_id for node in left}.isdisjoint(node.node_id for node in right)
+    assert not left
+    assert right
 
 
 @pytest.mark.parametrize("durable", [False, True])
