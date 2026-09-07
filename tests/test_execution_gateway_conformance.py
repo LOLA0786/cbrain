@@ -22,6 +22,7 @@ closure_v01 = pytest.importorskip("agent_dna.closure_v01")
 
 from cbrain import ActionIntent, ExecutionStatus, GovernedRuntime  # noqa: E402
 from cbrain.adapters.privatevault import (  # noqa: E402
+    DecisionBinding,
     PrivateVaultDecision,
     PrivateVaultVerdict,
 )
@@ -129,6 +130,9 @@ def dispatch_document() -> dict[str, Any]:
 
 
 def intent() -> ActionIntent:
+    # The governed arguments must equal the planned execution_action
+    # parameters: the pinned PrivateVault server refuses a mintable decision
+    # otherwise, and the gateway now binds the plan before deciding.
     return ActionIntent.capture(
         request_id="request-001",
         idempotency_key="request-001",
@@ -137,15 +141,22 @@ def intent() -> ActionIntent:
         tool_name="payments.refund",
         capability="payments.refund",
         timestamp=1_700_000_000.0,
-        arguments={"amount": 400000},
+        arguments=action_document()["parameters"],
     )
 
 
 class StubDecisionClient:
     def __init__(self, verdict: PrivateVaultVerdict) -> None:
         self.verdict = verdict
+        self.bindings: list[DecisionBinding] = []
 
-    def decide(self, action: ActionIntent) -> PrivateVaultDecision:
+    def decide(
+        self,
+        action: ActionIntent,
+        *,
+        binding: DecisionBinding,
+    ) -> PrivateVaultDecision:
+        self.bindings.append(binding)
         return PrivateVaultDecision(
             verdict=self.verdict,
             triggered_by="policy",
@@ -391,6 +402,82 @@ def test_allow_reaches_executed_through_the_real_evidence_chain():
     assert result.tool_executed is True
     assert result.output == {"refund_id": "rf-1"}
     assert len(calls) == 1
+
+
+def test_decision_is_requested_with_the_planned_action_and_dispatch():
+    keys = Keyring()
+    store = MemoryConsumptionStore()
+    gateway = build_gateway(keys, store)
+    decision_client = gateway._decision_client
+    assert isinstance(decision_client, StubDecisionClient)
+
+    result = GovernedRuntime(gateway).execute(intent(), lambda arguments: None)
+
+    assert result.status is ExecutionStatus.EXECUTED, result.reason
+    (binding,) = decision_client.bindings
+    assert binding.execution_action == action_document()
+    dispatch = dispatch_document()
+    assert binding.dispatch_context == {
+        "adapter": dispatch["transport"],
+        "transport": dispatch["transport"],
+        "operation": dispatch["operation"],
+        "destination": dispatch["destination"],
+        "wire_content_type": dispatch["wire_content_type"],
+    }
+
+
+def test_unplannable_intent_never_reaches_privatevault():
+    keys = Keyring()
+    store = MemoryConsumptionStore()
+    gateway = build_gateway(keys, store)
+    decision_client = gateway._decision_client
+    assert isinstance(decision_client, StubDecisionClient)
+    calls: list[Any] = []
+
+    class NoRoute:
+        def plan(self, action):
+            raise LookupError("no route")
+
+    gateway._planner = NoRoute()
+
+    result = GovernedRuntime(gateway).execute(
+        intent(), lambda arguments: calls.append(arguments)
+    )
+
+    assert result.status is ExecutionStatus.CONTROL_FAILURE
+    assert result.reason == "dispatch_planning_failed:LookupError"
+    assert decision_client.bindings == []
+    assert calls == []
+
+
+def test_plan_that_contradicts_the_intent_never_reaches_privatevault():
+    keys = Keyring()
+    store = MemoryConsumptionStore()
+    gateway = build_gateway(keys, store)
+    decision_client = gateway._decision_client
+    assert isinstance(decision_client, StubDecisionClient)
+
+    class WidenedPlanner:
+        def plan(self, action):
+            widened = action_document()
+            widened["parameters"] = {**widened["parameters"], "amount_override": 1}
+            return PlannedDispatch(
+                action=widened,
+                prepared=PreparedDispatch.capture(
+                    request_id=action.request_id,
+                    dispatch=dispatch_document(),
+                    wire_bytes=WIRE_BYTES,
+                    peer_identity_bytes=PEER_BYTES,
+                ),
+            )
+
+    gateway._planner = WidenedPlanner()
+
+    result = GovernedRuntime(gateway).execute(intent(), lambda arguments: None)
+
+    assert result.status is ExecutionStatus.CONTROL_FAILURE
+    assert result.reason == "dispatch_planning_failed:PrivateVaultBindingError"
+    assert decision_client.bindings == []
 
 
 def test_block_never_reaches_the_handler():

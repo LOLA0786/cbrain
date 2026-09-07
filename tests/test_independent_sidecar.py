@@ -48,6 +48,7 @@ def dispatch_document() -> dict[str, Any]:
 def action_document() -> dict[str, Any]:
     return {
         "subject_principal": "finance-agent@example",
+        "subject_key_id": "finance-agent",
         "action": "payments.transfer.initiate",
         "resource": "ledger:primary",
         "parameters": {
@@ -371,7 +372,7 @@ def test_unmarked_gateway_cannot_claim_execution_without_local_handler():
 
 
 class DecisionClient:
-    def decide(self, action):
+    def decide(self, action, *, binding):
         return PrivateVaultDecision(
             verdict=PrivateVaultVerdict.ALLOW,
             triggered_by="policy",
