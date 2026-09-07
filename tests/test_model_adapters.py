@@ -125,7 +125,7 @@ def test_anthropic_adapter_keeps_system_separate_and_parses_tool_use() -> None:
     assert "hidden" not in str(payload)
 
 
-def test_google_adapter_translates_and_derives_stable_call_id() -> None:
+def test_google_adapter_translates_and_assigns_unique_local_call_ids() -> None:
     transport = CaptureTransport(
         {
             "candidates": [
@@ -155,7 +155,7 @@ def test_google_adapter_translates_and_derives_stable_call_id() -> None:
 
     assert isinstance(first, ToolCall)
     assert isinstance(second, ToolCall)
-    assert first.call_id == second.call_id
+    assert first.call_id != second.call_id
     path, payload, _ = transport.calls[0]
     assert path.endswith("configured-google-model:generateContent")
     assert payload["systemInstruction"] == {"parts": [{"text": "Use tools carefully."}]}
@@ -176,7 +176,7 @@ def test_openai_text_response_is_neutral_text_output() -> None:
     assert adapter.complete(request()) == TextOutput("No tool is required.")
 
 
-def test_provider_refuses_ambiguous_text_and_tool_call() -> None:
+def test_provider_retains_text_alongside_one_tool_call() -> None:
     transport = CaptureTransport(
         {
             "choices": [
@@ -204,8 +204,10 @@ def test_provider_refuses_ambiguous_text_and_tool_call() -> None:
         headers_provider=lambda: {},
     )
 
-    with pytest.raises(ModelResponseError, match="both text and a tool call"):
-        adapter.complete(request())
+    output = adapter.complete(request())
+    assert isinstance(output, ToolCall)
+    assert output.continuation is not None
+    assert output.continuation.message["content"] == "I will call a tool."
 
 
 def test_provider_refuses_credential_shaped_returned_arguments() -> None:

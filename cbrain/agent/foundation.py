@@ -19,6 +19,7 @@ from cbrain.models import (
     ModelRouter,
     TextOutput,
     ToolCall,
+    validate_history,
 )
 from cbrain.runtime import GovernedRuntime
 
@@ -373,6 +374,18 @@ class FoundationAgent:
                 )
             )
 
+            try:
+                validate_history([*messages, output.as_message()], allow_pending=True)
+            except ModelError as exc:
+                return self._failed(
+                    run_id=run_id,
+                    status=RunStatus.INVALID_MODEL_RESPONSE,
+                    events=events,
+                    metadata=self._metadata(run_input, reason=str(exc)),
+                    tool_calls=tool_calls,
+                    model_turns=model_turns,
+                )
+            messages.append(output.as_message())
             handler = self._handlers[output.name]
             execution = self._runtime.execute(action, handler)
             tool_calls += 1
@@ -544,7 +557,10 @@ class FoundationAgent:
 
         ctx = initialized
         knowledge_message, knowledge_tools_blocked = self._knowledge_context(run_input)
-        if knowledge_message is not None:
+        if knowledge_message is not None and ctx.record.durable_state not in {
+            DurableRunState.TOOL_PREPARED,
+            DurableRunState.TOOL_COMPLETED,
+        }:
             ctx.messages.append(knowledge_message)
         try:
             tool_definitions = self._tools.definitions_for(
@@ -584,13 +600,13 @@ class FoundationAgent:
             output: TextOutput | ToolCall | None = None
             tool_resume_completed = False
             tool_resume_prepared = False
-            if resume_phase == "completed":
-                output = restore_tool_call(ctx.record)
-                tool_resume_completed = True
-                resume_phase = None
-            elif resume_phase == "prepared":
-                output = restore_tool_call(ctx.record)
-                tool_resume_prepared = True
+            if resume_phase in {"completed", "prepared"}:
+                try:
+                    output = restore_tool_call(ctx.record)
+                except RunStoreError as exc:
+                    raise FoundationAgentError(str(exc)) from exc
+                tool_resume_completed = resume_phase == "completed"
+                tool_resume_prepared = resume_phase == "prepared"
                 resume_phase = None
             else:
                 ctx.events.append(
@@ -709,6 +725,11 @@ class FoundationAgent:
             if isinstance(tool_result, RunResult):
                 return tool_result
             ctx = tool_result
+            if knowledge_message is not None and (
+                tool_resume_prepared or tool_resume_completed
+            ):
+                # Keep each assistant tool request adjacent to its result.
+                ctx.messages.append(knowledge_message)
             ctx.record = persist_record(
                 self._run_store,
                 ctx.record,
@@ -758,6 +779,16 @@ class FoundationAgent:
                 return self._persist_terminal(ctx, status=RunStatus.TIMED_OUT)
             if not resume_prepared:
                 try:
+                    validate_history(
+                        [*ctx.messages, output.as_message()], allow_pending=True
+                    )
+                except ModelError as exc:
+                    return self._persist_terminal(
+                        ctx,
+                        status=RunStatus.INVALID_MODEL_RESPONSE,
+                        metadata=self._metadata(run_input, reason=str(exc)),
+                    )
+                try:
                     action = ActionIntent.capture(
                         agent_id=self._profile.agent_id,
                         framework="cbrain-foundation",
@@ -776,6 +807,7 @@ class FoundationAgent:
                         metadata=self._metadata(run_input, reason=str(exc)),
                     )
 
+                ctx.messages.append(output.as_message())
                 ctx.events.append(
                     RunEvent(
                         kind=RunEventKind.TOOL_REQUESTED,

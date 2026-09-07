@@ -10,7 +10,13 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Protocol
 
-from cbrain.models import Message, MessageRole
+from cbrain.models import (
+    Message,
+    MessageRole,
+    ModelError,
+    ProviderContinuation,
+    ToolCall,
+)
 
 from .contracts import RunEvent, RunEventKind, RunInput, RunResult, RunStatus
 from .profile import AgentProfile
@@ -182,12 +188,28 @@ def profile_fingerprint(profile: AgentProfile) -> str:
 
 
 def serialize_message(message: Message) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "role": message.role.value,
         "content": message.content,
         "tool_call_id": message.tool_call_id,
         "tool_name": message.tool_name,
     }
+    if message.tool_call is not None:
+        call = message.tool_call
+        payload["tool_call"] = {
+            "call_id": call.call_id,
+            "name": call.name,
+            "arguments": call.arguments,
+        }
+        if call.continuation is not None:
+            turn = call.continuation
+            payload["tool_call"]["continuation"] = {
+                "provider": turn.provider,
+                "model": turn.model,
+                "wire_format": turn.wire_format,
+                "message": turn.message,
+            }
+    return payload
 
 
 def deserialize_message(payload: Mapping[str, Any]) -> Message:
@@ -199,12 +221,40 @@ def deserialize_message(payload: Mapping[str, Any]) -> Message:
         message_role = MessageRole(role)
     except ValueError as exc:
         raise RunStoreError("stored message role is invalid") from exc
-    return Message(
-        role=message_role,
-        content=content,
-        tool_call_id=payload.get("tool_call_id"),
-        tool_name=payload.get("tool_name"),
-    )
+    try:
+        tool_call = None
+        if payload.get("tool_call") is not None:
+            raw = payload["tool_call"]
+            if not isinstance(raw, dict) or not isinstance(raw.get("arguments"), dict):
+                raise RunStoreError("stored assistant call is invalid")
+            continuation = None
+            if raw.get("continuation") is not None:
+                turn = raw["continuation"]
+                if not isinstance(turn, dict) or not isinstance(
+                    turn.get("message"), dict
+                ):
+                    raise RunStoreError("stored continuation is invalid")
+                continuation = ProviderContinuation.capture(
+                    provider=_required_text(turn.get("provider"), "provider"),
+                    model=_required_text(turn.get("model"), "model"),
+                    wire_format=_required_text(turn.get("wire_format"), "wire_format"),
+                    message=turn["message"],
+                )
+            tool_call = ToolCall.capture(
+                call_id=_required_text(raw.get("call_id"), "call_id"),
+                name=_required_text(raw.get("name"), "name"),
+                arguments=raw["arguments"],
+                continuation=continuation,
+            )
+        return Message(
+            role=message_role,
+            content=content,
+            tool_call_id=payload.get("tool_call_id"),
+            tool_name=payload.get("tool_name"),
+            tool_call=tool_call,
+        )
+    except ModelError as exc:
+        raise RunStoreError("stored assistant history is invalid") from exc
 
 
 def serialize_event(event: RunEvent) -> dict[str, Any]:

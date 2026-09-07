@@ -6,7 +6,7 @@ import json
 import math
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol
 
@@ -61,11 +61,22 @@ class Message:
     content: str
     tool_call_id: str | None = None
     tool_name: str | None = None
+    tool_call: ToolCall | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.role, MessageRole):
             raise ModelContractError("message role is invalid")
-        _required_text(self.content, "message content")
+        if self.tool_call is not None:
+            if self.role is not MessageRole.ASSISTANT or not isinstance(
+                self.tool_call, ToolCall
+            ):
+                raise ModelContractError(
+                    "only assistant messages may carry a tool call"
+                )
+            if self.content != "":
+                raise ModelContractError("tool-call text belongs in its continuation")
+        else:
+            _required_text(self.content, "message content")
         if self.role is MessageRole.TOOL:
             _required_text(self.tool_call_id, "tool_call_id")
             _tool_name(self.tool_name, "tool_name")
@@ -120,6 +131,7 @@ class CompletionRequest:
             raise ModelContractError("completion requires at least one message")
         if any(not isinstance(item, Message) for item in self.messages):
             raise ModelContractError("messages must contain Message objects")
+        validate_history(self.messages)
         if any(not isinstance(item, ToolDefinition) for item in self.tools):
             raise ModelContractError("tools must contain ToolDefinition objects")
         names = [item.name for item in self.tools]
@@ -145,12 +157,17 @@ class ToolCall:
     call_id: str
     name: str
     _arguments_json: bytes
+    continuation: ProviderContinuation | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         _required_text(self.call_id, "tool call ID")
         _tool_name(self.name, "tool call name")
         arguments = _restore_object(self._arguments_json, "tool arguments")
         _reject_sensitive_keys(arguments, "tool arguments")
+        if self.continuation is not None:
+            if not isinstance(self.continuation, ProviderContinuation):
+                raise ModelContractError("invalid provider continuation")
+            self.continuation.validate_call(self)
 
     @classmethod
     def capture(
@@ -159,16 +176,115 @@ class ToolCall:
         call_id: str,
         name: str,
         arguments: Mapping[str, Any],
+        continuation: ProviderContinuation | None = None,
     ) -> ToolCall:
         return cls(
             call_id=call_id,
             name=name,
             _arguments_json=_canonical_object(arguments, "tool arguments"),
+            continuation=continuation,
         )
 
     @property
     def arguments(self) -> dict[str, Any]:
         return _restore_object(self._arguments_json, "tool arguments")
+
+    def as_message(self) -> Message:
+        return Message(MessageRole.ASSISTANT, "", tool_call=self)
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderContinuation:
+    """Bounded assistant content, echoed only to its originating provider/model.
+
+    This is conversation data, never authorization or transport configuration.
+    Keeping canonical bytes prevents mutable provider responses from changing a
+    saved tool proposal. Opaque signatures are excluded from the default repr.
+    """
+
+    provider: str
+    model: str
+    wire_format: str
+    _message_json: bytes = field(repr=False)
+
+    def __post_init__(self) -> None:
+        _required_text(self.provider, "continuation provider")
+        _required_text(self.model, "continuation model")
+        if not isinstance(self.wire_format, str) or self.wire_format not in {
+            "chat_completions",
+            "anthropic",
+            "google",
+        }:
+            raise ModelContractError("unsupported continuation format")
+        if (
+            not isinstance(self._message_json, bytes)
+            or len(self._message_json) > 262144
+        ):
+            raise ModelContractError("continuation exceeds 262144 bytes or is invalid")
+        payload = _restore_object(self._message_json, "continuation")
+        _validate_json(payload, "continuation", set())
+
+    @classmethod
+    def capture(
+        cls,
+        *,
+        provider: str,
+        model: str,
+        wire_format: str,
+        message: Mapping[str, Any],
+    ) -> ProviderContinuation:
+        return cls(
+            provider, model, wire_format, _canonical_object(message, "continuation")
+        )
+
+    @property
+    def message(self) -> dict[str, Any]:
+        return _restore_object(self._message_json, "continuation")
+
+    def for_route(
+        self, *, provider: str, model: str, wire_format: str
+    ) -> dict[str, Any]:
+        if (self.provider, self.model, self.wire_format) != (
+            provider,
+            model,
+            wire_format,
+        ):
+            raise ModelContractError("provider continuation route mismatch")
+        return self.message
+
+    def validate_call(self, call: ToolCall) -> None:
+        # Local import avoids making the neutral contract depend on adapters.
+        from .continuation import validate_continuation_call
+
+        validate_continuation_call(self, call)
+
+
+def validate_history(
+    messages: Sequence[Message], *, allow_pending: bool = False
+) -> None:
+    """Require one assistant request followed immediately by its matching result."""
+    pending: ToolCall | None = None
+    seen: set[str] = set()
+    for message in messages:
+        if message.role is MessageRole.TOOL:
+            if pending is None or (message.tool_call_id, message.tool_name) != (
+                pending.call_id,
+                pending.name,
+            ):
+                raise ModelContractError("tool result has no matching assistant call")
+            pending = None
+        else:
+            if pending is not None:
+                raise ModelContractError(
+                    "assistant tool call must be followed by its result"
+                )
+            if message.tool_call is not None:
+                pending = message.tool_call
+                if pending.call_id in seen:
+                    raise ModelContractError("duplicate assistant tool call ID")
+                seen.add(pending.call_id)
+    if pending is not None and not allow_pending:
+        raise ModelContractError("assistant tool call is missing its result")
 
 
 @dataclass(frozen=True, slots=True)
@@ -380,6 +496,7 @@ __all__ = [
     "ModelOutput",
     "ModelResponseError",
     "ModelTransportError",
+    "ProviderContinuation",
     "TextOutput",
     "ToolCall",
     "ToolDefinition",
@@ -387,4 +504,5 @@ __all__ = [
     "required_list",
     "required_mapping",
     "required_response_text",
+    "validate_history",
 ]

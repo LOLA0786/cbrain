@@ -121,6 +121,9 @@ def _estimate_usage(
     cached_input_tokens: int = 0,
 ) -> TokenUsage:
     input_chars = sum(len(message.content) for message in request.messages)
+    for message in request.messages:
+        if message.tool_call is not None:
+            input_chars += _tool_history_chars(message.tool_call)
     input_chars += sum(
         len(json.dumps(tool.input_schema, sort_keys=True)) for tool in request.tools
     )
@@ -132,7 +135,7 @@ def _estimate_usage(
         output_tokens = _tokens_from_chars(len(output.text), chars_per_token)
     else:
         output_tokens = _tokens_from_chars(
-            len(json.dumps(output.arguments, sort_keys=True)),
+            _tool_history_chars(output),
             chars_per_token,
         )
     return TokenUsage(
@@ -149,6 +152,12 @@ def _estimate_usage(
             "simulated_assumption" if cached_input_tokens > 0 else None
         ),
     )
+
+
+def _tool_history_chars(call: ToolCall) -> int:
+    if call.continuation is not None:
+        return len(call.continuation._message_json.decode("utf-8"))
+    return len(json.dumps(call.arguments, sort_keys=True))
 
 
 def _provider_reported_usage(

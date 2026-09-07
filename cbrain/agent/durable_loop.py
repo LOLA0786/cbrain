@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from cbrain.contracts import ActionIntent, ContractError, GovernedExecution
-from cbrain.models import Message, MessageRole, ToolCall
+from cbrain.models import Message, MessageRole, ModelError, ToolCall, validate_history
 
 from .contracts import RunEvent, RunInput, RunResult, RunStatus
 from .durable import (
@@ -361,11 +361,28 @@ def restore_tool_call(record: StoredRunRecord) -> ToolCall:
     arguments = record.pending_action.get("arguments")
     if not isinstance(arguments, dict):
         raise RunStoreError("pending tool arguments are invalid")
-    return ToolCall.capture(
-        call_id=record.pending_tool_call_id,
-        name=record.pending_tool_name,
-        arguments=arguments,
-    )
+    messages = [deserialize_message(item) for item in record.messages]
+    try:
+        validate_history(messages, allow_pending=True)
+        pending = ToolCall.capture(
+            call_id=record.pending_tool_call_id,
+            name=record.pending_tool_name,
+            arguments=arguments,
+        )
+    except ModelError as exc:
+        raise RunStoreError("pending assistant history is invalid") from exc
+    call = messages[-1].tool_call if messages else None
+    if call is None:
+        raise RunStoreError(
+            "pending tool has no saved assistant turn; migration required"
+        )
+    if (call.call_id, call.name, call._arguments_json) != (
+        pending.call_id,
+        pending.name,
+        pending._arguments_json,
+    ):
+        raise RunStoreError("pending action and assistant call do not match")
+    return call
 
 
 def restore_execution(record: StoredRunRecord) -> GovernedExecution:
