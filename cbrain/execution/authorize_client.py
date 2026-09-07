@@ -18,7 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from hmac import compare_digest
 from typing import Any, cast
@@ -34,6 +34,10 @@ from cbrain.adapters.privatevault import (
 )
 from cbrain.contracts import ActionIntent
 from cbrain.execution.gateway import IssuedAuthorization, PlannedDispatch
+from cbrain.execution.security_events import (
+    SecurityEventEvidenceError,
+    SecurityEventEvidenceProvider,
+)
 
 _SHA256_PREFIXED = re.compile(r"sha256:[0-9a-f]{64}")
 
@@ -93,6 +97,8 @@ class PrivateVaultAuthorizationClient:
         organisation_id: str,
         evidence_digests: EvidenceDigests,
         path: str = "/v1/authorize",
+        security_event_provider: SecurityEventEvidenceProvider | None = None,
+        require_security_events: bool = False,
     ) -> None:
         if not isinstance(organisation_id, str) or not organisation_id.strip():
             raise ValueError("organisation_id must be non-empty text")
@@ -101,6 +107,8 @@ class PrivateVaultAuthorizationClient:
         self._organisation_id = organisation_id
         self._digests = evidence_digests
         self._path = path
+        self._security_event_provider = security_event_provider
+        self._require_security_events = require_security_events
 
     def issue(
         self,
@@ -132,6 +140,13 @@ class PrivateVaultAuthorizationClient:
             "policy_bundle_digest": self._digests.policy_bundle_digest,
             "obligations_digest": self._digests.obligations_digest,
         }
+        events = self._security_events(
+            action=action,
+            decision=decision,
+            planned=planned,
+        )
+        if events is not None:
+            body["security_events"] = events
 
         try:
             response = self._transport.post_json(self._path, body)
@@ -227,6 +242,41 @@ class PrivateVaultAuthorizationClient:
             raise AuthorizationRefused(
                 "authorization action does not match the requested action"
             )
+
+    def _security_events(
+        self,
+        *,
+        action: ActionIntent,
+        decision: PrivateVaultDecision,
+        planned: PlannedDispatch,
+    ) -> list[dict[str, Any]] | None:
+        if self._security_event_provider is None:
+            if self._require_security_events:
+                raise AuthorizationRefused(
+                    "security_events are required but no trusted evidence "
+                    "provider is configured"
+                )
+            return None
+        try:
+            events = self._security_event_provider.events_for_authorize(
+                action=action,
+                decision=decision,
+                planned=planned,
+            )
+        except SecurityEventEvidenceError as exc:
+            raise AuthorizationRefused(
+                f"trusted security-event evidence refused: {exc}"
+            ) from exc
+        if not isinstance(events, Sequence) or isinstance(events, (str, bytes)):
+            raise AuthorizationRefused(
+                "trusted security-event evidence must be a sequence of events"
+            )
+        materialized = [dict(event) for event in events]
+        if not materialized:
+            raise AuthorizationRefused(
+                "trusted security-event evidence must include at least one event"
+            )
+        return materialized
 
 
 def _sealed_allow_reference(

@@ -120,6 +120,8 @@ def pinned_privatevault_server(
     organisation_id: str,
     grants: Mapping[str, tuple[str, ...]],
     blocked_capabilities: tuple[str, ...] = (),
+    loop_events_required: bool = False,
+    secure_profile: bool = False,
 ) -> Iterator[PinnedServer]:
     """Start the pinned server with one full-scope API key per agent.
 
@@ -197,6 +199,59 @@ def pinned_privatevault_server(
     )
     monkeypatch.setenv("PV_TRUST_BUNDLE", str(tmp_path / "trust-bundle.json"))
     monkeypatch.delenv("PV_ALLOW_NO_AUTH", raising=False)
+    if secure_profile:
+        from agent_dna.signer_python import ReceiptSigner
+
+        receipt_seed = "ab" * 32
+        receipt = ReceiptSigner(seed_hex=receipt_seed)
+        monkeypatch.setenv("PV_RECEIPT_SIGNING_KEY", receipt_seed)
+        monkeypatch.setenv("PV_TRUSTED_PUBLIC_KEYS", receipt.public_key)
+        execution_trust = {
+            "spec": authority_v01.TRUST_SPEC,
+            "canonicalization": authority_v01.CANONICALIZATION,
+            "organisation_id": organisation_id,
+            "bundle_version": 1,
+            "pinned_at": "2026-07-31T11:00:00Z",
+            "keys": [
+                {
+                    "key_id": "execution-signer-01",
+                    "principal": f"execution-runtime@{organisation_id}",
+                    "algorithm": "ed25519",
+                    "public_key": authority_v01.encode_public_key(keyring.execution),
+                    "usages": ["execution_authorization_signer"],
+                },
+                {
+                    "key_id": "witness-signer-01",
+                    "principal": f"dispatcher@{organisation_id}",
+                    "algorithm": "ed25519",
+                    "public_key": authority_v01.encode_public_key(keyring.witness),
+                    "usages": ["dispatch_witness_signer", "closure_signer"],
+                },
+            ],
+        }
+        (tmp_path / "execution-trust.json").write_text(
+            json.dumps(execution_trust), encoding="utf-8"
+        )
+        (tmp_path / "dispatch-witness.key").write_bytes(bytes(keyring.witness))
+        monkeypatch.setenv(
+            "PV_EXECUTION_TRUST_BUNDLE_FILE",
+            str(tmp_path / "execution-trust.json"),
+        )
+        monkeypatch.setenv(
+            "PV_DISPATCH_WITNESS_KEY",
+            str(tmp_path / "dispatch-witness.key"),
+        )
+        monkeypatch.setenv("PV_SECURE_PROFILE", "1")
+    else:
+        monkeypatch.delenv("PV_SECURE_PROFILE", raising=False)
+        monkeypatch.delenv("PV_RECEIPT_SIGNING_KEY", raising=False)
+        monkeypatch.delenv("PV_TRUSTED_PUBLIC_KEYS", raising=False)
+        monkeypatch.delenv("PV_EXECUTION_TRUST_BUNDLE_FILE", raising=False)
+        monkeypatch.delenv("PV_DISPATCH_WITNESS_KEY", raising=False)
+    if loop_events_required or secure_profile:
+        monkeypatch.setenv("PV_LOOP_EVENTS_REQUIRED", "1")
+    else:
+        monkeypatch.delenv("PV_LOOP_EVENTS_REQUIRED", raising=False)
 
     import api.server as server
 
