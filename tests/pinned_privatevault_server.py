@@ -181,6 +181,13 @@ def pinned_privatevault_server(
         encoding="utf-8",
     )
 
+    # Train the synthetic drift scorer on every granted capability so a
+    # first-time ALLOW is not novelty-escalated to REVIEW. Matches the
+    # Campfire evaluation's use of PV_BASELINE_CAPABILITIES.
+    granted = sorted(
+        {capability for capabilities in grants.values() for capability in capabilities}
+    )
+    monkeypatch.setenv("PV_BASELINE_CAPABILITIES", ",".join(granted))
     monkeypatch.setenv("PV_DB_PATH", str(tmp_path / "privatevault.db"))
     monkeypatch.setenv("PV_API_KEYS_FILE", str(tmp_path / "keys.json"))
     monkeypatch.setenv("PV_GRANTS_FILE", str(tmp_path / "grants.json"))

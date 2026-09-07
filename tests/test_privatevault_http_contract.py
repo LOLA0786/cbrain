@@ -23,6 +23,16 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from pinned_privatevault_server import (
+    PinnedServer,
+    TestClientTransport,
+    pinned_privatevault_server,
+)
+from test_execution_gateway_conformance import (
+    Closer,
+    MemoryConsumptionStore,
+    SealingDispatchTransport,
+)
 
 from cbrain import ActionIntent, ExecutionStatus, GovernedRuntime
 from cbrain.adapters.privatevault import (
@@ -49,16 +59,6 @@ from cbrain.execution.authorize_client import (
     PrivateVaultAuthorizationClient,
 )
 from cbrain.execution.planner import HttpDispatchPlanner, ToolRoute
-from pinned_privatevault_server import (
-    PinnedServer,
-    TestClientTransport,
-    pinned_privatevault_server,
-)
-from test_execution_gateway_conformance import (
-    Closer,
-    MemoryConsumptionStore,
-    SealingDispatchTransport,
-)
 
 execution_v01 = pytest.importorskip("agent_dna.execution_v01")
 dispatch_v01 = pytest.importorskip("agent_dna.dispatch_v01")
@@ -459,9 +459,13 @@ def test_changed_dispatch_after_decision_cannot_mint(pv):
 def test_another_agents_record_cannot_mint(pv):
     buyer = Harness(pv, BUYER)
     other = Harness(pv, OTHER)
-    buyer_decision, _ = buyer.bound_decision(intent())
+    # Same request_id so the client reaches the agent_id check rather
+    # than stopping at "decision answers a different request".
+    buyer_decision, _ = buyer.bound_decision(
+        intent(request_id="req-shared-001")
+    )
 
-    other_action = intent(agent_id=OTHER, request_id="req-other-001")
+    other_action = intent(agent_id=OTHER, request_id="req-shared-001")
     other_planned = other.planner.plan(other_action)
 
     # The client sees the record was sealed for someone else.
