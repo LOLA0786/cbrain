@@ -24,6 +24,7 @@ _REQUIRED_DISPATCH_FIELDS = frozenset(
         "credential_audience",
         "idempotency_key_digest",
         "retry_policy_digest",
+        "serialization",
     }
 )
 
@@ -36,6 +37,7 @@ _TEXT_FIELDS = frozenset(
         "wire_content_encoding",
         "tool_id",
         "credential_audience",
+        "serialization",
     }
 )
 

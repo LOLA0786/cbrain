@@ -43,6 +43,7 @@ def dispatch() -> dict[str, Any]:
         "credential_audience": "ledger.example",
         "idempotency_key_digest": ZERO,
         "retry_policy_digest": ONE,
+        "serialization": "pv-json-parameters/0.1",
     }
 
 
@@ -326,6 +327,7 @@ def test_bound_decide_request_carries_execution_action_and_dispatch_context():
         "operation": "POST /v1/payments",
         "destination": "ledger.example",
         "wire_content_type": "application/json",
+        "serialization": "pv-json-parameters/0.1",
     }
     # The audit fields are unchanged; the pinned server derives the digests
     # itself and refuses caller-authored ones.

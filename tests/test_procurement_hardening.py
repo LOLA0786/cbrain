@@ -381,6 +381,7 @@ def _verified_closure_for(
             "credential_audience": "procurement.example",
             "idempotency_key_digest": ZERO,
             "retry_policy_digest": ONE,
+            "serialization": "pv-json-parameters/0.1",
         },
         wire_bytes=b'{"award":true}',
         peer_identity_bytes=b"tls-spki-sha256:" + (b"a" * 64),

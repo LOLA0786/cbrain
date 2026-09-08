@@ -96,6 +96,7 @@ def _prepared() -> PreparedDispatch:
             "credential_audience": "payments.example",
             "idempotency_key_digest": ZERO,
             "retry_policy_digest": ONE,
+            "serialization": "pv-json-parameters/0.1",
         },
         wire_bytes=b'{"amount":400000}',
         peer_identity_bytes=(b"tls-spki-sha256:" + (b"a" * 64)),
