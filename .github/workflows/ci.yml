@@ -72,6 +72,9 @@ jobs:
       - name: Mandatory execution-gateway conformance
         run: uv run python -m pytest -q tests/test_execution_gateway_conformance.py
 
+      - name: Adversary escape suite
+        run: uv run python -m pytest -q tests/adversary/
+
       - name: Full test suite
         run: uv run python -m pytest -q
 
@@ -180,3 +183,54 @@ jobs:
             echo "live knowledge tests skipped unexpectedly"
             exit 1
           fi
+
+  isolation:
+    name: isolation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: cbrain
+
+    steps:
+      - name: Check out CBrain
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: cbrain
+          persist-credentials: false
+
+      - name: Prove worker cannot reach write; sidecar can
+        working-directory: cbrain/deploy/isolation
+        run: |
+          set -euo pipefail
+          chmod +x probe.sh
+          docker compose -f compose.yml up --abort-on-container-exit --exit-code-from worker
+          docker compose -f compose.yml logs worker | tee /tmp/isolation-worker.log
+          grep -q PROBE_PASSED /tmp/isolation-worker.log
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with:
+          version: "0.12.9"
+          enable-cache: true
+          working-directory: cbrain
+          cache-dependency-glob: uv.lock
+
+      - name: Install locked development dependencies
+        run: uv sync --locked --extra dev
+
+      - name: Isolation pytest gate
+        env:
+          CBRAIN_ISOLATION: "1"
+          CBRAIN_ISOLATION_PROBE: passed
+        run: |
+          uv run python -m pytest -q \
+            tests/test_isolation_boundary.py \
+            tests/adversary/test_escape_suite.py \
+            tests/test_claim_matrix.py

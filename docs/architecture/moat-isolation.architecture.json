@@ -1,0 +1,67 @@
+{
+  "schemaVersion": "1.0.0",
+  "diagramType": "architecture",
+  "title": "CBrain moat isolation topology",
+  "description": "Worker cannot reach write endpoints or credentials. Sidecar is sole egress. PrivateVault alone authorizes. Generated for Archify (https://github.com/tt-a1i/archify); not a substitute for CI isolation probes.",
+  "nodes": [
+    {
+      "id": "worker",
+      "label": "Agent worker",
+      "role": "compute",
+      "notes": "No WRITE_SECRET; control_net only"
+    },
+    {
+      "id": "sidecar",
+      "label": "Independent dispatcher",
+      "role": "boundary",
+      "notes": "Deployment-pinned trust; credentials here only"
+    },
+    {
+      "id": "privatevault",
+      "label": "PrivateVault",
+      "role": "authority",
+      "notes": "Sole authorize / mint / evidence"
+    },
+    {
+      "id": "write",
+      "label": "Business write target",
+      "role": "datastore",
+      "notes": "write_net only; reference or customer target"
+    }
+  ],
+  "edges": [
+    {
+      "from": "worker",
+      "to": "privatevault",
+      "label": "decide / authorize"
+    },
+    {
+      "from": "worker",
+      "to": "sidecar",
+      "label": "dispatch RPC (control_net)"
+    },
+    {
+      "from": "sidecar",
+      "to": "write",
+      "label": "exact-byte HTTPS (write_net)"
+    },
+    {
+      "from": "worker",
+      "to": "write",
+      "label": "DENIED",
+      "style": "denied"
+    }
+  ],
+  "views": [
+    {
+      "id": "isolation",
+      "title": "Network isolation",
+      "focus": ["worker", "sidecar", "write"]
+    },
+    {
+      "id": "authority",
+      "title": "Authority path",
+      "focus": ["worker", "privatevault", "sidecar"]
+    }
+  ]
+}
