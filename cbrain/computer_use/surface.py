@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from .sanitize import looks_like_secret, sanitize_excerpt
+
 
 class ComputerBackendError(RuntimeError):
     """The computer backend could not complete an observation or act."""
@@ -20,6 +22,40 @@ class BackendObservation:
     url_alias: str
     accessibility_tree: str
     text_excerpt: str
+    screenshot_sha256: str | None = None
+    screenshot_media_type: str | None = None
+
+    def to_wire(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "title": self.title,
+            "url_alias": self.url_alias,
+            "accessibility_tree": self.accessibility_tree,
+            "text_excerpt": self.text_excerpt,
+        }
+        if self.screenshot_sha256 is not None:
+            payload["screenshot_sha256"] = self.screenshot_sha256
+        if self.screenshot_media_type is not None:
+            payload["screenshot_media_type"] = self.screenshot_media_type
+        return payload
+
+    @classmethod
+    def from_wire(cls, payload: dict[str, Any]) -> BackendObservation:
+        return cls(
+            title=str(payload.get("title", "")),
+            url_alias=str(payload.get("url_alias", "")),
+            accessibility_tree=str(payload.get("accessibility_tree", "")),
+            text_excerpt=str(payload.get("text_excerpt", "")),
+            screenshot_sha256=(
+                str(payload["screenshot_sha256"])
+                if payload.get("screenshot_sha256") is not None
+                else None
+            ),
+            screenshot_media_type=(
+                str(payload["screenshot_media_type"])
+                if payload.get("screenshot_media_type") is not None
+                else None
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +63,12 @@ class BackendActResult:
     ok: bool
     detail: str
     observation: BackendObservation | None = None
+
+    def to_wire(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {"ok": self.ok, "detail": self.detail}
+        if self.observation is not None:
+            payload["observation"] = self.observation.to_wire()
+        return payload
 
 
 class ComputerBackend(Protocol):
@@ -72,7 +114,7 @@ class DevOnlyBrowserBackend:
             title=str(page.get("title", "")),
             url_alias=url_alias,
             accessibility_tree=str(page.get("accessibility_tree", "")),
-            text_excerpt=_sanitize_excerpt(str(page.get("text_excerpt", ""))),
+            text_excerpt=sanitize_excerpt(str(page.get("text_excerpt", ""))),
         )
 
     def navigate(self, *, url_alias: str, url: str) -> BackendActResult:
@@ -103,7 +145,7 @@ class DevOnlyBrowserBackend:
         self, *, url_alias: str, selector: str, text: str
     ) -> BackendActResult:
         self._require_open(url_alias)
-        if _looks_like_secret(text):
+        if looks_like_secret(text):
             raise ComputerBackendError(
                 "refusing to type secret-shaped text from model context"
             )
@@ -138,34 +180,6 @@ def require_production_computer_backend(backend: ComputerBackend) -> None:
             "DevOnlyBrowserBackend is DEV_ONLY; production requires an "
             "out-of-process computer worker reached via sole-egress sidecar"
         )
-
-
-_SECRET_MARKERS = (
-    "password",
-    "passwd",
-    "secret",
-    "api_key",
-    "apikey",
-    "token",
-    "bearer ",
-)
-
-
-def _looks_like_secret(text: str) -> bool:
-    lowered = text.lower()
-    return any(marker in lowered for marker in _SECRET_MARKERS)
-
-
-def _sanitize_excerpt(text: str) -> str:
-    """Strip obvious secret-shaped lines before model context."""
-
-    lines = []
-    for line in text.splitlines() or [text]:
-        if _looks_like_secret(line):
-            lines.append("[redacted]")
-        else:
-            lines.append(line)
-    return "\n".join(lines)
 
 
 __all__ = [

@@ -65,13 +65,16 @@ requires `ci-isolation` evidence in `docs/claims.md`.
 
 ## 4. Computer / desktop use
 
+See `docs/computer-use.md`.
+
 Browser and desktop acts use the same sole-egress rule:
 
 - Model sees **page aliases**, never raw URLs or credentials.
-- `observe` is read-only against an already-open alias.
-- `navigate` / `click` / `type` / `submit` enter `GovernedRuntime`.
-- `DevOnlyBrowserBackend` is DEV_ONLY; production must reach a computer worker
-  through the sidecar, not dial destinations from the agent namespace.
+- FoundationAgent tools go through `GovernedRuntime` once via `ComputerToolBridge`.
+- `RemoteComputerBackend` talks only to the computer worker (not page URLs).
+- Compose probe: `deploy/computer/` — agent ↛ web fixture; agent → worker.
+- Screenshots: digest only (`screenshot_sha256`); raw PNG stays in the worker.
+- `DevOnlyBrowserBackend` is DEV_ONLY; production must use the remote worker.
 
 ## 5. What this design does **not** claim
 

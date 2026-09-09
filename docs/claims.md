@@ -31,6 +31,10 @@ Evidence levels:
 | Production config refuses in-process dispatch | `unit` | `tests/test_production_dispatch_mode.py` |
 | Computer-use navigate enters GovernedRuntime; model never sees URL | `unit` | `tests/test_computer_use.py` |
 | DEV_ONLY browser backend refused for production assembly | `unit` | `tests/test_computer_use.py::test_production_refuses_dev_only_backend` |
+| Out-of-process computer worker + RemoteComputerBackend | `independent-process` | `tests/test_computer_worker.py` |
+| FoundationAgent computer tools resolve catalog URLs only | `unit` | `tests/test_computer_worker.py::test_foundation_agent_runs_computer_navigate` |
+| Agent↛web; computer-worker sole browser path (compose) | `ci-isolation` | `deploy/computer/probe.sh` + `tests/test_computer_isolation_boundary.py` |
+| Screenshot evidence is digest-only in model context | `unit` | `tests/test_computer_worker.py::test_remote_backend_is_production_grade` |
 
 ## Forbidden language unless evidence exists
 

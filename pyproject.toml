@@ -15,6 +15,7 @@ cbrain-hermes = "cbrain.hermes_launcher:main"
 cbrain-insights = "cbrain.agent.insights_cli:main"
 cbrain-knowledge = "cbrain.knowledge_cli:main"
 cbrain-spki = "cbrain.execution.spki_cli:main"
+cbrain-computer-worker = "cbrain.computer_use.cli:main"
 
 [project.optional-dependencies]
 dev = [
@@ -38,6 +39,9 @@ privatevault = [
 knowledge = [
     "psycopg[binary]>=3.2",
     "redis>=5.0",
+]
+computer = [
+    "playwright>=1.48",
 ]
 
 [tool.setuptools.packages.find]
