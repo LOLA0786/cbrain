@@ -1,0 +1,52 @@
+services:
+  web-fixture:
+    image: python:3.12-slim
+    networks:
+      - web_net
+    volumes:
+      - ./web_fixture.py:/app/web_fixture.py:ro
+    command: ["python", "/app/web_fixture.py"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  computer-worker:
+    image: python:3.12-slim
+    networks:
+      - web_net
+      - control_net
+    environment:
+      CBRAIN_COMPUTER_TOKEN: worker-shared-token
+      CBRAIN_COMPUTER_ENGINE: stub
+      CBRAIN_COMPUTER_HOST: 0.0.0.0
+      CBRAIN_COMPUTER_PORT: "8765"
+      WEB_FIXTURE_URL: http://web-fixture:8080/
+    volumes:
+      - ./worker_entry.py:/app/worker_entry.py:ro
+    command: ["python", "/app/worker_entry.py"]
+    depends_on:
+      web-fixture:
+        condition: service_healthy
+
+  agent:
+    image: python:3.12-slim
+    networks:
+      - control_net
+    environment:
+      COMPUTER_WORKER_URL: http://computer-worker:8765/v1/computer
+      CBRAIN_COMPUTER_TOKEN: worker-shared-token
+      WEB_FIXTURE_URL: http://web-fixture:8080/
+    volumes:
+      - ./agent_probe.py:/app/agent_probe.py:ro
+      - ./probe.sh:/app/probe.sh:ro
+    entrypoint: ["/bin/sh", "/app/probe.sh"]
+    depends_on:
+      - computer-worker
+
+networks:
+  web_net:
+    internal: true
+  control_net:
+    internal: true

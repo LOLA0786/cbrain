@@ -218,6 +218,15 @@ jobs:
           docker compose -f compose.yml logs worker | tee /tmp/isolation-worker.log
           grep -q PROBE_PASSED /tmp/isolation-worker.log
 
+      - name: Prove agent cannot reach web; computer-worker can
+        working-directory: cbrain/deploy/computer
+        run: |
+          set -euo pipefail
+          chmod +x probe.sh
+          docker compose -f compose.yml up --abort-on-container-exit --exit-code-from agent
+          docker compose -f compose.yml logs agent | tee /tmp/computer-agent.log
+          grep -q PROBE_PASSED /tmp/computer-agent.log
+
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
@@ -238,8 +247,10 @@ jobs:
         env:
           CBRAIN_ISOLATION: "1"
           CBRAIN_ISOLATION_PROBE: passed
+          CBRAIN_COMPUTER_ISOLATION_PROBE: passed
         run: |
           uv run python -m pytest -q \
             tests/test_isolation_boundary.py \
+            tests/test_computer_isolation_boundary.py \
             tests/adversary/test_escape_suite.py \
             tests/test_claim_matrix.py

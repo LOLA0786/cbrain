@@ -34,16 +34,21 @@ class ComputerObservation:
     title: str
     accessibility_tree: str
     text_excerpt: str
+    screenshot_sha256: str | None = None
+    screenshot_media_type: str | None = None
 
     def to_model_payload(self) -> Mapping[str, str]:
-        return MappingProxyType(
-            {
-                "url_alias": self.url_alias,
-                "title": self.title,
-                "accessibility_tree": self.accessibility_tree,
-                "text_excerpt": self.text_excerpt,
-            }
-        )
+        payload: dict[str, str] = {
+            "url_alias": self.url_alias,
+            "title": self.title,
+            "accessibility_tree": self.accessibility_tree,
+            "text_excerpt": self.text_excerpt,
+        }
+        if self.screenshot_sha256 is not None:
+            payload["screenshot_sha256"] = self.screenshot_sha256
+        if self.screenshot_media_type is not None:
+            payload["screenshot_media_type"] = self.screenshot_media_type
+        return MappingProxyType(payload)
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,6 +204,8 @@ def _to_observation(raw: BackendObservation) -> ComputerObservation:
         title=raw.title,
         accessibility_tree=raw.accessibility_tree,
         text_excerpt=raw.text_excerpt,
+        screenshot_sha256=raw.screenshot_sha256,
+        screenshot_media_type=raw.screenshot_media_type,
     )
 
 

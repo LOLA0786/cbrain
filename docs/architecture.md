@@ -107,6 +107,11 @@ cbrain/                      Python package (import cbrain)
 │   ├── transport.py         InProcessDispatchTransport (DEV_ONLY)
 │   └── sidecar.py           Independent sole-egress dispatcher
 ├── computer_use/            Governed browser/desktop surface (alias≠URL)
+│   ├── client.py            RemoteComputerBackend (prod; worker client)
+│   ├── worker.py            Out-of-process HTTP worker
+│   ├── tools.py             FoundationAgent tool pack + bridge
+│   └── engines.py           Stub | Playwright engines (worker-only)
+
 │
 ├── models/                  Inference only — no policy, no tools
 │   ├── contracts.py         complete(messages, tools) → ToolCall | TextOutput
