@@ -200,6 +200,15 @@ jobs:
           path: cbrain
           persist-credentials: false
 
+      - name: Check out pinned PrivateVault Agent DNA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: LOLA0786/privatevault-agent-dna
+          ref: 65673769d4c7cd2de980f5f5c335ac09141b7434
+          path: privatevault-agent-dna
+          ssh-key: ${{ secrets.PRIVATEVAULT_REPO_SSH_KEY }}
+          persist-credentials: false
+
       - name: Prove worker cannot reach write; sidecar can
         working-directory: cbrain/deploy/isolation
         run: |
@@ -222,8 +231,8 @@ jobs:
           working-directory: cbrain
           cache-dependency-glob: uv.lock
 
-      - name: Install locked development dependencies
-        run: uv sync --locked --extra dev
+      - name: Install locked development and PrivateVault dependencies
+        run: uv sync --locked --extra dev --extra privatevault
 
       - name: Isolation pytest gate
         env:

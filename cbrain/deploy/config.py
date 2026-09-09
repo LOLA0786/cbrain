@@ -64,9 +64,7 @@ class DeploymentConfig:
     @property
     def requires_independent_sidecar(self) -> bool:
         """True when this config must assemble a sole-egress sidecar."""
-        return (
-            self.environment == "production" or self.dispatch_mode == "sidecar"
-        )
+        return self.environment == "production" or self.dispatch_mode == "sidecar"
 
 
 def load(path: str | Path) -> DeploymentConfig:
@@ -133,9 +131,7 @@ def _environment(raw: Mapping[str, Any]) -> EnvironmentName:
     # Fail closed: missing environment means production.
     value = raw.get("environment", "production")
     if not isinstance(value, str) or value not in _VALID_ENVIRONMENTS:
-        raise ConfigurationError(
-            "environment must be 'development' or 'production'"
-        )
+        raise ConfigurationError("environment must be 'development' or 'production'")
     return value  # type: ignore[return-value]
 
 
@@ -143,9 +139,7 @@ def _dispatch_mode(raw: Mapping[str, Any]) -> DispatchModeName:
     # Fail closed: missing mode means sidecar sole egress.
     value = raw.get("dispatch_mode", "sidecar")
     if not isinstance(value, str) or value not in _VALID_DISPATCH_MODES:
-        raise ConfigurationError(
-            "dispatch_mode must be 'sidecar' or 'in_process'"
-        )
+        raise ConfigurationError("dispatch_mode must be 'sidecar' or 'in_process'")
     return value  # type: ignore[return-value]
 
 
