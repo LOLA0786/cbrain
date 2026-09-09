@@ -1,0 +1,51 @@
+services:
+  write-target:
+    image: python:3.12-slim
+    networks:
+      - write_net
+    environment:
+      WRITE_SECRET: sidecar-only-write-token
+    volumes:
+      - ./write_target.py:/app/write_target.py:ro
+    command: ["python", "/app/write_target.py"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  sidecar:
+    image: python:3.12-slim
+    networks:
+      - write_net
+      - control_net
+    environment:
+      WRITE_URL: http://write-target:8080/v1/purchase-orders
+      WRITE_SECRET: sidecar-only-write-token
+    volumes:
+      - ./sidecar_probe.py:/app/sidecar_probe.py:ro
+    command: ["python", "/app/sidecar_probe.py", "serve"]
+    depends_on:
+      write-target:
+        condition: service_healthy
+
+  worker:
+    image: python:3.12-slim
+    networks:
+      - control_net
+    environment:
+      SIDECAR_URL: http://sidecar:8090/dispatch
+      WRITE_URL: http://write-target:8080/v1/purchase-orders
+      # Intentionally no WRITE_SECRET
+    volumes:
+      - ./probe.sh:/app/probe.sh:ro
+      - ./worker_probe.py:/app/worker_probe.py:ro
+    entrypoint: ["/bin/sh", "/app/probe.sh"]
+    depends_on:
+      - sidecar
+
+networks:
+  write_net:
+    internal: true
+  control_net:
+    internal: true

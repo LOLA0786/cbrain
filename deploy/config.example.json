@@ -4,6 +4,9 @@
   "subject_principal": "refund-agent@acme-bank",
   "subject_key_id": "refund-agent-01",
 
+  "environment": "production",
+  "dispatch_mode": "sidecar",
+
   "privatevault_base_url": "https://privatevault.internal.acme-bank:8443",
   "database_url": "postgresql://cbrain@postgres:5432/cbrain",
 

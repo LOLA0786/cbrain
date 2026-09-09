@@ -1,18 +1,18 @@
 """The dispatch boundary.
 
 `DispatchTransport` is the seam between a co-located dispatcher and an
-independent one. `InProcessDispatchTransport` is a unit-test double: it runs
-the tool handler inside the agent process and cannot produce EXECUTED against
-real Agent DNA, because it returns no closure and the gateway will not seal
-one. A sidecar implementation of this protocol swaps in without touching the
-gateway.
+independent one. `InProcessDispatchTransport` is **dev/test only**: it runs
+the tool handler inside the agent process and cannot produce production
+EXECUTED against real Agent DNA. Production assemblies must use an
+independent sidecar (`identity.independent is True`); see
+`require_production_dispatch_transport`.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Final, Protocol
 
 from cbrain.dispatch import PreparedDispatch
 
@@ -23,6 +23,9 @@ if TYPE_CHECKING:
 
 WitnessSigner = Callable[..., Mapping[str, Any]]
 
+# Marker type alias for static review: in-process is never a prod transport.
+DEV_ONLY_DISPATCH: Final = True
+
 
 class DispatchTransportError(RuntimeError):
     """The dispatch boundary could not produce witnessed evidence."""
@@ -30,6 +33,10 @@ class DispatchTransportError(RuntimeError):
 
 class HandlerNotInvoked(DispatchTransportError):
     """Failure is proven to have occurred before the tool handler ran."""
+
+
+class ProductionDispatchRequired(DispatchTransportError):
+    """Production refused a non-independent / in-process dispatch path."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,8 +79,22 @@ class DispatchTransport(Protocol):
         """Transmit the exact bytes and return signed dispatch evidence."""
 
 
+def require_production_dispatch_transport(transport: DispatchTransport) -> None:
+    """Fail closed if the assembly tries to ship in-process as production."""
+
+    if isinstance(transport, InProcessDispatchTransport):
+        raise ProductionDispatchRequired(
+            "InProcessDispatchTransport is DEV_ONLY; production requires an "
+            "independent sidecar sole-egress path"
+        )
+    if not transport.identity.independent:
+        raise ProductionDispatchRequired(
+            "production dispatch transport must declare an independent witness"
+        )
+
+
 class InProcessDispatchTransport:
-    """Unit-test double: dispatch and witness in the agent process.
+    """DEV_ONLY unit-test double: dispatch and witness in the agent process.
 
     It cannot produce EXECUTED against real Agent DNA. The witness signature
     is real and the digests are computed from the same byte string the permit
@@ -81,7 +102,13 @@ class InProcessDispatchTransport:
     an independent dispatch boundary to seal one. `identity.independent` is
     False; nothing here prevents the process from signing a witness for bytes
     it did not actually transmit.
+
+    Do not wire this into `DeploymentConfig` / production startup. Call
+    `require_production_dispatch_transport` at assembly time.
     """
+
+    # Class attribute for grep/type-system audits.
+    DEV_ONLY: Final[bool] = True
 
     def __init__(
         self,
@@ -214,10 +241,13 @@ def _default_response_encoder(output: Any) -> bytes:
 
 
 __all__ = [
+    "DEV_ONLY_DISPATCH",
     "DispatchResult",
     "DispatchTransport",
     "DispatchTransportError",
     "HandlerNotInvoked",
     "InProcessDispatchTransport",
+    "ProductionDispatchRequired",
     "WitnessIdentity",
+    "require_production_dispatch_transport",
 ]

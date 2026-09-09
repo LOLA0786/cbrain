@@ -104,8 +104,9 @@ cbrain/                      Python package (import cbrain)
 │   ├── gateway.py           PrivateVaultExecutionGateway
 │   ├── planner.py           Intent → PreparedDispatch (catalog-owned)
 │   ├── authorize_client.py  Signed permit issuance
-│   ├── transport.py         In-process dispatch (not witness-independent)
+│   ├── transport.py         InProcessDispatchTransport (DEV_ONLY)
 │   └── sidecar.py           Independent sole-egress dispatcher
+├── computer_use/            Governed browser/desktop surface (alias≠URL)
 │
 ├── models/                  Inference only — no policy, no tools
 │   ├── contracts.py         complete(messages, tools) → ToolCall | TextOutput
@@ -235,9 +236,12 @@ Failure **before** the handler/send is `CONTROL_FAILURE` (retryable only as a
 new request after the control plane is healthy). Failure **after** send may
 have started is `INDETERMINATE`.
 
-The in-process transport is a unit-test double only. It cannot produce
-`EXECUTED` against real Agent DNA: it returns no closure, and the gateway will
-not seal one. Production egress is the sidecar, which:
+The in-process transport is **DEV_ONLY**. It cannot produce `EXECUTED` against
+real Agent DNA: it returns no closure, and the gateway will not seal one.
+`DeploymentConfig` with `environment=production` refuses
+`dispatch_mode=in_process`. Call `require_production_dispatch_transport` at
+assembly. Isolation design: `docs/sidecar-isolation.md`. Production egress is
+the sidecar, which:
 
 - runs outside the agent process
 - never receives model-provider or target secrets from the agent

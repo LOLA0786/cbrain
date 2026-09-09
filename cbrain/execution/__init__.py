@@ -27,12 +27,15 @@ from .sidecar import (
     serve_sidecar,
 )
 from .transport import (
+    DEV_ONLY_DISPATCH,
     DispatchResult,
     DispatchTransport,
     DispatchTransportError,
     HandlerNotInvoked,
     InProcessDispatchTransport,
+    ProductionDispatchRequired,
     WitnessIdentity,
+    require_production_dispatch_transport,
 )
 
 __all__ = [
@@ -40,6 +43,7 @@ __all__ = [
     "ClosureWriter",
     "CredentialHeader",
     "CredentialProvider",
+    "DEV_ONLY_DISPATCH",
     "DispatchPlanner",
     "DispatchResult",
     "DispatchTransport",
@@ -55,6 +59,7 @@ __all__ = [
     "PlannedDispatch",
     "PinnedHTTPSConnector",
     "PrivateVaultExecutionGateway",
+    "ProductionDispatchRequired",
     "SidecarDispatchService",
     "SidecarDispatchTransport",
     "SidecarError",
@@ -65,5 +70,6 @@ __all__ = [
     "TargetConnector",
     "TargetResponse",
     "WitnessIdentity",
+    "require_production_dispatch_transport",
     "serve_sidecar",
 ]
