@@ -6,6 +6,9 @@ first consequential action.
 
 Configuration is TOML-free on purpose: JSON only, so the config that produced
 a deployment can be digested and recorded alongside the evidence it governs.
+
+``dispatch_mode=in_process`` is DEV_ONLY. Production environment refuses it at
+load time so an engineer cannot ship co-located dispatch as a prod option.
 """
 
 from __future__ import annotations
@@ -16,10 +19,16 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Final, Literal
 
 from cbrain.execution.planner import ToolRoute
 from cbrain.execution.tls import PeerIdentityError, require_peer_identity
+
+EnvironmentName = Literal["development", "production"]
+DispatchModeName = Literal["sidecar", "in_process"]
+
+_VALID_ENVIRONMENTS: Final[frozenset[str]] = frozenset({"development", "production"})
+_VALID_DISPATCH_MODES: Final[frozenset[str]] = frozenset({"sidecar", "in_process"})
 
 
 class ConfigurationError(RuntimeError):
@@ -39,6 +48,8 @@ class DeploymentConfig:
     witness_signer_key_id: str
     request_timeout_seconds: float
     config_digest: str
+    environment: EnvironmentName
+    dispatch_mode: DispatchModeName
 
     @property
     def api_key(self) -> str:
@@ -49,6 +60,13 @@ class DeploymentConfig:
                 "PV_API_KEY is not set; refusing to start unauthenticated"
             )
         return key
+
+    @property
+    def requires_independent_sidecar(self) -> bool:
+        """True when this config must assemble a sole-egress sidecar."""
+        return (
+            self.environment == "production" or self.dispatch_mode == "sidecar"
+        )
 
 
 def load(path: str | Path) -> DeploymentConfig:
@@ -85,6 +103,15 @@ def load(path: str | Path) -> DeploymentConfig:
             "privatevault_base_url must be https outside localhost"
         )
 
+    environment = _environment(raw)
+    dispatch_mode = _dispatch_mode(raw)
+
+    if dispatch_mode == "in_process" and environment != "development":
+        raise ConfigurationError(
+            "dispatch_mode=in_process is DEV_ONLY; set environment=development "
+            "or use dispatch_mode=sidecar for production sole egress"
+        )
+
     return DeploymentConfig(
         organisation_id=_text(raw, "organisation_id"),
         agent_id=_text(raw, "agent_id"),
@@ -97,7 +124,29 @@ def load(path: str | Path) -> DeploymentConfig:
         witness_signer_key_id=_text(raw, "witness_signer_key_id"),
         request_timeout_seconds=float(raw.get("request_timeout_seconds", 5.0)),
         config_digest=digest,
+        environment=environment,
+        dispatch_mode=dispatch_mode,
     )
+
+
+def _environment(raw: Mapping[str, Any]) -> EnvironmentName:
+    # Fail closed: missing environment means production.
+    value = raw.get("environment", "production")
+    if not isinstance(value, str) or value not in _VALID_ENVIRONMENTS:
+        raise ConfigurationError(
+            "environment must be 'development' or 'production'"
+        )
+    return value  # type: ignore[return-value]
+
+
+def _dispatch_mode(raw: Mapping[str, Any]) -> DispatchModeName:
+    # Fail closed: missing mode means sidecar sole egress.
+    value = raw.get("dispatch_mode", "sidecar")
+    if not isinstance(value, str) or value not in _VALID_DISPATCH_MODES:
+        raise ConfigurationError(
+            "dispatch_mode must be 'sidecar' or 'in_process'"
+        )
+    return value  # type: ignore[return-value]
 
 
 def _load_routes(value: object) -> dict[str, ToolRoute]:

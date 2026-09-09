@@ -28,6 +28,9 @@ Evidence levels:
 | Uncertain PO create reconciles by business key; no blind resubmit | `reference-target` | `tests/test_governed_po_idempotency.py` |
 | Unapproved REVIEW never mints or executes | `real-server` | `tests/test_privatevault_http_contract.py::test_unapproved_review_cannot_mint_and_never_calls_authorize` |
 | We do **not** claim exactly-once purchase delivery | — | Explicit non-claim; INDETERMINATE + reconcile |
+| Production config refuses in-process dispatch | `unit` | `tests/test_production_dispatch_mode.py` |
+| Computer-use navigate enters GovernedRuntime; model never sees URL | `unit` | `tests/test_computer_use.py` |
+| DEV_ONLY browser backend refused for production assembly | `unit` | `tests/test_computer_use.py::test_production_refuses_dev_only_backend` |
 
 ## Forbidden language unless evidence exists
 
@@ -35,3 +38,5 @@ Evidence levels:
 - “ERP / Oracle / SAP connected” without a live sandbox pin
 - “network isolated” without `ci-isolation` evidence
 - “production ready approvals” without durable REVIEW pins
+- “we already beat Microsoft / Zenity on enforcement coverage”
+- “computer use dials the open web from the agent pod” (must be sidecar / worker)
